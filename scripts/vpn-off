@@ -7,6 +7,8 @@ sudo iptables -t mangle -F VPN_MARK 2>/dev/null || true
 sudo iptables -t mangle -X VPN_MARK 2>/dev/null || true
 sudo ip rule del priority 100 fwmark 0x1 lookup 200 2>/dev/null || true
 sudo ip route flush table 200 2>/dev/null || true
+# Quitar el forzado de IPv4 del slice (OpenCode/Freebuff vuelven a poder usar IPv6)
+sudo ip6tables -D OUTPUT -m cgroup --path /vpn.slice -j REJECT 2>/dev/null || true
 # Quitar SNAT del túnel si existe
 TUN_IP=$(ip -o addr show dev tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d/ -f1)
 if [ -n "$TUN_IP" ]; then

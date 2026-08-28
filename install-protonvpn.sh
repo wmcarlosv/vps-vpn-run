@@ -9,6 +9,7 @@
 # - No activa la VPN ni la auto-arranca (bajo demanda).
 # - No toca tus apps/webs/SSH (la VPN es exclusiva para vpn.slice).
 # - vpn-run ejecuta en el directorio actual del llamador (recupera chats).
+# - vpn-on fuerza IPv4 en el slice (OpenCode/Freebuff por el túnel IPv4).
 # =====================================================================
 set -e
 
@@ -537,6 +538,14 @@ while :; do
 done
 sudo iptables -t nat -A POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP"
 
+# 4c) Forzar IPv4 en el slice (IMPORTANTE: el túnel es IPv4-only).
+#     OpenCode/Freebuff resuelven su backend por IPv6 y, sin esto, su tráfico
+#     sale por la IPv6 física del VPS y NUNCA pasa por la VPN (se nota como
+#     "no funciona el límite por IP"). Con REJECT (no DROP) el sistema cae
+#     al instante a IPv4 -> túnel -> VPN.
+sudo ip6tables -D OUTPUT -m cgroup --path /vpn.slice -j REJECT 2>/dev/null || true
+sudo ip6tables -I OUTPUT 1 -m cgroup --path /vpn.slice -j REJECT
+
 # 5) Mover Freebuff y OpenCode al slice VPN (sus conexiones nuevas saldrán por el túnel)
 echo "Buscando Freebuff/OpenCode..."
 # Mover procesos vivos a vpn.slice NO es fiable en sesiones SSH (systemd bloquea
@@ -589,6 +598,8 @@ sudo iptables -t mangle -F VPN_MARK 2>/dev/null || true
 sudo iptables -t mangle -X VPN_MARK 2>/dev/null || true
 sudo ip rule del priority 100 fwmark 0x1 lookup 200 2>/dev/null || true
 sudo ip route flush table 200 2>/dev/null || true
+# Quitar el forzado de IPv4 del slice (OpenCode/Freebuff vuelven a poder usar IPv6)
+sudo ip6tables -D OUTPUT -m cgroup --path /vpn.slice -j REJECT 2>/dev/null || true
 # Quitar SNAT del túnel si existe
 TUN_IP=$(ip -o addr show dev tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d/ -f1)
 if [ -n "$TUN_IP" ]; then

@@ -112,7 +112,11 @@ curl -s https://api.ipify.org
    se marca (`fwmark 0x1`) y sale por la VPN.
 5. Un **SNAT** en POSTROUTING reescribe la IP de origen a la IP del túnel para que
    Proton no descarte los paquetes (anti-spoofing).
-6. El resto del sistema (sin marca) sale por la tabla principal → IP física siempre.
+6. **IPv4 forzado en el slice**: el túnel es IPv4-only, y OpenCode/Freebuff resuelven
+   su backend por IPv6 (lo que los haría salir por la IPv6 física y no por la VPN).
+   `vpn-on` añade un `ip6tables REJECT` para los procesos de `vpn.slice`, así caen
+   al instante a IPv4 → túnel → VPN. `vpn-off` lo retira.
+7. El resto del sistema (sin marca) sale por la tabla principal → IP física siempre.
 
 `vpn-off` limpia marcas, reglas, la regla de policy-routing, el SNAT y detiene el túnel.
 
@@ -179,6 +183,7 @@ Freebuff/OpenCode que estén corriendo, y te recuerda este paso (`sudo vpn-run .
 | Una app no sale por la VPN | El proceso no fue lanzado por `vpn-run` y no está en `vpn.slice` | Ábrela con `sudo vpn-run <comando>` (los procesos ya abiertos no se mueven solos) |
 | `vpn-run` da "Device or resource busy" | Sistema intenta mover un proceso vivo de una sesión SSH (no se puede) | No es un fallo: usa `systemd-run` integrado en `vpn-run`; si el mensaje persiste, relanza el comando |
 | `No se pudo conectar` para un país | El servidor elegido cambió de IP | Elige otra IP en el menú (opción 3) o edita el `remote` de la config |
+| OpenCode/Freebuff salen por la IP física (no por la VPN) | El backend resuelve por IPv6 y el túnel es IPv4-only | Ya está resuelto: `vpn-on` fuerza IPv4 en el slice con `ip6tables REJECT`; verifícalo con `sudo vpn-run curl -s https://api.ipify.org` |
 
 ---
 
