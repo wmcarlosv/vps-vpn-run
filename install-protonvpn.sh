@@ -8,6 +8,7 @@
 # - Idempotente: se puede ejecutar varias veces sin romper nada.
 # - No activa la VPN ni la auto-arranca (bajo demanda).
 # - No toca tus apps/webs/SSH (la VPN es exclusiva para vpn.slice).
+# - vpn-run ejecuta en el directorio actual del llamador (recupera chats).
 # =====================================================================
 set -e
 
@@ -612,6 +613,8 @@ cat > /usr/local/sbin/vpn-run <<'VPN_RUN'
 # vpn-run <comando...> - Ejecuta un comando con el tráfico saliendo por la VPN
 # Uso: sudo vpn-run curl https://api.ipify.org
 #      sudo vpn-run opencode
+# Ejecuta en el directorio actual del llamador (cd al PWD original) para que
+# opencode/freebuff levanten desde donde estás y recuperen sus chats de esa carpeta.
 # Solo este comando usa el túnel; el resto del sistema queda por la IP física.
 if [ $# -eq 0 ]; then
   echo "Uso: sudo vpn-run <comando> [argumentos...]"
@@ -622,12 +625,15 @@ if ! ip a show tun0 >/dev/null 2>&1; then
   exit 1
 fi
 RUNAS="${SUDO_USER:-$(id -un)}"
+# Directorio desde el que se invoca vpn-run (sudo conserva el PWD del llamador)
+WORKDIR="${PWD:-$(pwd 2>/dev/null)}"
 # Se usa systemd-run (no write directo a cgroup.procs): en sesiones SSH, escribir el
 # PID a vpn.slice/cgroup.procs falla con "Device or resource busy" porque systemd
 # gestiona el scope de la sesión. systemd-run crea una unidad bajo vpn.slice de
-# forma legitima y su tráfico se marca (match cgroup /vpn.slice) -> sale por el tunel.
+# forma legitima, su tráfico se marca (match cgroup /vpn.slice) -> sale por el tunel.
+# El comando arranca en $WORKDIR (cd primero) y hereda TODOS los argumentos.
 exec sudo systemd-run --collect --slice=vpn.slice --pipe \
-  runuser -u "$RUNAS" -- "$@"
+  runuser -u "$RUNAS" -- bash -c 'cd "$1" 2>/dev/null || true; shift; exec "$@"' vpn-run "$WORKDIR" "$@"
 VPN_RUN
 
 cat > /usr/local/sbin/vpn-menu <<'VPN_MENU'

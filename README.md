@@ -157,6 +157,10 @@ sudo vpn-run node /usr/bin/freebuff   # según cómo la lances
 sudo vpn-run curl -s https://api.ipify.org   # comprobar salida (IP de la VPN)
 ```
 
+> 📂 **Se ejecuta en tu directorio actual.** `vpn-run` conserva la carpeta desde la que
+> lo lanzas (`cd` primero al `PWD` original). Así, si estás dentro de un proyecto y
+> haces `sudo vpn-run opencode`, OpenCode abre ahí y encuentra tus chats de esa carpeta.
+
 Cuando `vpn-on <país>` se ejecuta, se **detectan e informan** los procesos
 Freebuff/OpenCode que estén corriendo, y te recuerda este paso (`sudo vpn-run ...`).
 
