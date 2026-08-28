@@ -12,6 +12,9 @@ if ! ip a show tun0 >/dev/null 2>&1; then
   exit 1
 fi
 RUNAS="${SUDO_USER:-$(id -un)}"
-sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec runuser -u "$1" -- "${@:2}"' _ "$RUNAS" "$@"
-
-
+# Se usa systemd-run (no write directo a cgroup.procs): en sesiones SSH, escribir el
+# PID a vpn.slice/cgroup.procs falla con "Device or resource busy" porque systemd
+# gestiona el scope de la sesión. systemd-run crea una unidad bajo vpn.slice de
+# forma legitima y su tráfico se marca (match cgroup /vpn.slice) -> sale por el tunel.
+exec sudo systemd-run --collect --slice=vpn.slice --pipe \
+  runuser -u "$RUNAS" -- "$@"

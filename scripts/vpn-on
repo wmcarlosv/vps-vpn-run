@@ -115,10 +115,14 @@ done
 sudo iptables -t nat -A POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP"
 
 # 5) Mover Freebuff y OpenCode al slice VPN (sus conexiones nuevas saldrán por el túnel)
-echo "Moviendo Freebuff/OpenCode al slice VPN..."
-sudo python3 - <<'PY'
-import os, sys
-targets = []
+echo "Buscando Freebuff/OpenCode..."
+# Mover procesos vivos a vpn.slice NO es fiable en sesiones SSH (systemd bloquea
+# escribir a cgroup.procs con "Device or resource busy"). La forma correcta de que
+# Freebuff/OpenCode salgan por la VPN es lanzarlos con: sudo vpn-run <app>
+# (usuario ver README). Aqui solo se informa de los encontrados.
+sudo python3 - <<'PY' || true
+import os
+found = []
 for pid in os.listdir('/proc'):
     if not pid.isdigit():
         continue
@@ -128,23 +132,21 @@ for pid in os.listdir('/proc'):
     except Exception:
         continue
     if 'freebuff' in cmd or 'opencode' in cmd:
-        targets.append(pid)
-moved = 0
-with open('/sys/fs/cgroup/vpn.slice/cgroup.procs', 'w') as f:
-    for pid in targets:
-        try:
-            f.write(pid + '\n'); f.flush()
-            moved += 1
-        except Exception:
-            pass
-print(f"  {moved} proceso(s) movidos a vpn.slice")
+        found.append((pid, cmd.strip()[:60]))
+if found:
+    print(f"  Encontrados {len(found)} proceso(s) Freebuff/OpenCode:")
+    for pid, cmd in found[:10]:
+        print(f"    PID {pid}: {cmd}")
+    print("  Para que salgan por la VPN, relanza cada uno con:  sudo vpn-run <comando>")
+else:
+    print("  No hay procesos Freebuff/OpenCode corriendo.")
 PY
 
 # 6) Verificación (a través del túnel)
 ip route show table "$TABLE" | grep -q '^default' || sudo ip route add default dev tun0 src "$TUN_IP" table "$TABLE"
 echo "Verificando salida por el túnel..."
-IPOUT=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://api.ipify.org' 2>/dev/null || echo "?")
-LOC=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://ipinfo.io/json' 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country","?"))' 2>/dev/null || echo "?")
+IPOUT=$(sudo vpn-run curl -s --max-time 10 https://api.ipify.org 2>/dev/null | tail -1)
+LOC=$(sudo vpn-run curl -s --max-time 10 https://ipinfo.io/json 2>/dev/null | tail -1 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country","?"))' 2>/dev/null || echo "?")
 echo "✓ VPN ACTIVA ($FOREIGN)"
 echo "  Salida de Freebuff/OpenCode: $IPOUT ($LOC)"
 echo "  IP física (todo lo demás):   $PHYS_IP  <- intacta"

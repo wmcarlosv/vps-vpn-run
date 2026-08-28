@@ -12,9 +12,10 @@ TUN_IP=$(ip -o addr show dev tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d
 if [ -n "$TUN_IP" ]; then
   sudo iptables -t nat -D POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP" 2>/dev/null || true
 fi
-# 2) Detener el túnel
-sudo systemctl stop openvpn-client@protonvpn-nl 2>/dev/null || true
-sudo systemctl stop openvpn-client@protonvpn-us 2>/dev/null || true
+# 2) Detener el túnel: CUALQUIER servicio ProtonVPN activo (no solo nl/us)
+for u in $(systemctl list-units --all --no-legend 'openvpn-client@protonvpn-*' 'openvpn-client@protonvpn-*.service' 2>/dev/null | awk '{print $1}'); do
+  sudo systemctl stop "$u" 2>/dev/null || true
+done
 sleep 2
 if ip a show tun0 >/dev/null 2>&1; then
   sudo ip link del tun0 2>/dev/null || true

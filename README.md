@@ -108,8 +108,8 @@ curl -s https://api.ipify.org
 2. Se crea una **tabla de enrutamiento 200** con la ruta por defecto hacia `tun0`.
 3. Se añade una regla de policy-routing que envía a esa tabla **solo los paquetes
    marcados** (`fwmark 0x1`) provenientes de procesos en `vpn.slice`.
-4. `vpn-run` ejecuta el comando tras mover el proceso a `vpn.slice` → su tráfico
-   sale por la VPN.
+4. `vpn-run` lanza el comando **dentro de `vpn.slice` vía `systemd-run`** → su tráfico
+   se marca (`fwmark 0x1`) y sale por la VPN.
 5. Un **SNAT** en POSTROUTING reescribe la IP de origen a la IP del túnel para que
    Proton no descarte los paquetes (anti-spoofing).
 6. El resto del sistema (sin marca) sale por la tabla principal → IP física siempre.
@@ -136,33 +136,33 @@ curl -s https://api.ipify.org
 
 ### 🎯 Freebuff y OpenCode por la VPN — en detalle
 
-Hay **dos formas** de que Freebuff/OpenCode salgan por la VPN, y conviene entender
-las dos:
+La **única forma fiable** de que Freebuff/OpenCode salgan por la VPN es **lanzarlos
+con `sudo vpn-run <comando>`**, porque `vpn-run` crea el proceso directamente dentro
+de `vpn.slice` con `systemd-run` (el mecanismo correcto).
 
-#### A) Automática — al encender la VPN (`vpn-on`)
-Cuando ejecutas `vpn-on <país>`, el script **escanea `/proc` y mueve a `vpn.slice`
-todo proceso cuyo nombre contenga `freebuff` u `opencode`**. Es decir:
+> ⚠️ **Por qué no se mueven solos:** a diferencia de lo que uno esperaría, `vpn-on` **no
+> mueve** los procesos que ya están corriendo en tu sesión. En una sesión SSH, mover un
+> proceso vivo a `vpn.slice` escribiendo su PID a `cgroup.procs` falla con
+> **"Device or resource busy"** (systemd gestiona el scope de la sesión y lo bloquea).
+> Por eso el diseño es lanzo-con-`vpn-run`, no manejo-en-caliente.
 
-- Si ya tienes **Freebuff** abierto (p. ej. como `node /usr/bin/freebuff` o como helper
-  `/home/ubuntu/.config/manicode/freebuff`) → se mueve solo, **no haces nada más**.
-- Si ya tienes **OpenCode** abierto (`/usr/bin/opencode`) → también se mueve solo.
-- Si los lanzas **con otro nombre de proceso** (AppImage, `npx`, binario propio, Docker),
-  la búsqueda automática puede **no detectarlos**. En ese caso usa la forma B.
-
-#### B) Explícita — con `sudo vpn-run <comando>`
-Para lanzar una instancia concreta, o cuando el nombre del proceso varíe según cómo
-instalaste la app. Este siempre enruta ese comando por la VPN:
+#### La forma funcionante — `sudo vpn-run <comando>`
+Cada proceso que lanzas así nace en `vpn.slice` y **su tráfico sale por la VPN**.
+Todo lo demás del sistema queda por tu IP física:
 
 ```bash
-sudo vpn-run freebuff          # Freebuff por la VPN
-sudo vpn-run opencode          # OpenCode por la VPN
-sudo vpn-run node /usr/bin/freebuff     # según cómo la lances
+sudo vpn-run freebuff                 # Freebuff por la VPN
+sudo vpn-run opencode                 # OpenCode por la VPN
+sudo vpn-run node /usr/bin/freebuff   # según cómo la lances
+sudo vpn-run curl -s https://api.ipify.org   # comprobar salida (IP de la VPN)
 ```
 
-> **Regla práctica:** si Freebuff/OpenCode ya están corriendo → usa `vpn-on`. Si vas a
-> lanzarlos por primera vez con la VPN ya activa, o corren bajo otro nombre → usa
-> `sudo vpn-run <comando>`. Ambas consiguen lo mismo: ese proceso sale por la VPN y
-> el resto del sistema queda por tu IP física.
+Cuando `vpn-on <país>` se ejecuta, se **detectan e informan** los procesos
+Freebuff/OpenCode que estén corriendo, y te recuerda este paso (`sudo vpn-run ...`).
+
+> 💡 **Regla práctica:** abre Freebuff/OpenCode **con `sudo vpn-run <comando>`** siempre
+> que quieras que salgan por la VPN. Si los abres de la forma normal, siguen saliendo
+> por tu IP física (y cualquier límite por IP que tengas se mantiene).
 
 ---
 
@@ -172,7 +172,8 @@ sudo vpn-run node /usr/bin/freebuff     # según cómo la lances
 |---|---|---|
 | `vpn-run curl` devuelve vacío o `?` | El `curl` de verificación puede haber caído en rate-limit (campo de país) | Espera unos segundos y reintenta; la IP es lo que importa |
 | El túnel no levanta al cambiar de país | `tun0` huérfano de una sesión anterior | Ya se limpia automáticamente; si persiste: `sudo vpn-off` y luego `vpn-on <pais>` |
-| Una app no sale por la VPN | El proceso no está en `vpn.slice` | `sudo vpn-run <app>` o muévela al slice |
+| Una app no sale por la VPN | El proceso no fue lanzado por `vpn-run` y no está en `vpn.slice` | Ábrela con `sudo vpn-run <comando>` (los procesos ya abiertos no se mueven solos) |
+| `vpn-run` da "Device or resource busy" | Sistema intenta mover un proceso vivo de una sesión SSH (no se puede) | No es un fallo: usa `systemd-run` integrado en `vpn-run`; si el mensaje persiste, relanza el comando |
 | `No se pudo conectar` para un país | El servidor elegido cambió de IP | Elige otra IP en el menú (opción 3) o edita el `remote` de la config |
 
 ---

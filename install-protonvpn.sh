@@ -1,16 +1,22 @@
 #!/bin/bash
-# ============================================================
-# Instalador + Menú VPN ProtonVPN (solo Freebuff/OpenCode)
-# Portable: detecta la interfaz de red automáticamente.
-# - Instala OpenVPN, configs NL/US/JP + credenciales/certificados
-# - vpn-on / vpn-off / vpn-run / vpn-menu  +  vpn.slice
-# - NUNCA toca el tráfico de tus apps/webs/SSH (siempre IP física)
-# Uso: sudo bash install-protonvpn.sh
-#      sudo vpn-menu
-# ============================================================
+# =====================================================================
+# Instalador ProtonVPN (VPS VPN Run) — Freebuff/OpenCode por la VPN
+#
+# Instala TODO: OpenVPN (si falta), configs NL/US/JP, credenciales y
+# certificados, los 4 scripts (vpn-on/off/run/menu), vpn.slice y sysctl.
+# - Portatil: detecta interfaz de red y gateway automaticamente.
+# - Idempotente: se puede ejecutar varias veces sin romper nada.
+# - No activa la VPN ni la auto-arranca (bajo demanda).
+# - No toca tus apps/webs/SSH (la VPN es exclusiva para vpn.slice).
+# =====================================================================
 set -e
-GREEN='\033[0;32m'; NC='\033[0m'
-echo "== Verificando OpenVPN =="
+
+echo "== VPS VPN Run — instalador =="
+echo
+
+# ---------------------------------------------------------------------
+# 1) Instalar OpenVPN si no existe
+# ---------------------------------------------------------------------
 if ! command -v openvpn >/dev/null 2>&1; then
   echo "  Instalando openvpn..."
   apt-get update -qq && apt-get install -y openvpn
@@ -18,10 +24,12 @@ else
   echo "  openvpn ya instalado ($(openvpn --version 2>/dev/null | head -1))"
 fi
 
-echo "== Configuraciones ProtonVPN =="
+# ---------------------------------------------------------------------
+# 2) Configs de protonvpn (NL / US / JP) + credenciales
+# ---------------------------------------------------------------------
 mkdir -p /etc/openvpn/client
 
-cat > /etc/openvpn/client/protonvpn-nl.conf <<'CONF_NL'
+cat > /etc/openvpn/client/protonvpn-nl.conf <<'VPN_CONF_NL'
 # ==============================================================================
 # Copyright (c) 2023 Proton AG (Switzerland)
 # Email: contact@protonvpn.com
@@ -146,13 +154,9 @@ aeb893d9a96d1f15519bb3c4dcb40ee3
 16672ea16c012664f8a9f11255518deb
 -----END OpenVPN Static key V1-----
 </tls-crypt>
+VPN_CONF_NL
 
-
-
-
-CONF_NL
-
-cat > /etc/openvpn/client/protonvpn-us.conf <<'CONF_US'
+cat > /etc/openvpn/client/protonvpn-us.conf <<'VPN_CONF_US'
 # ==============================================================================
 # Copyright (c) 2023 Proton AG (Switzerland)
 # Email: contact@protonvpn.com
@@ -277,13 +281,9 @@ aeb893d9a96d1f15519bb3c4dcb40ee3
 16672ea16c012664f8a9f11255518deb
 -----END OpenVPN Static key V1-----
 </tls-crypt>
+VPN_CONF_US
 
-
-
-
-CONF_US
-
-cat > /etc/openvpn/client/protonvpn-jp.conf <<'CONF_JP'
+cat > /etc/openvpn/client/protonvpn-jp.conf <<'VPN_CONF_JP'
 # ==============================================================================
 # Copyright (c) 2023 Proton AG (Switzerland)
 # Email: contact@protonvpn.com
@@ -408,22 +408,17 @@ aeb893d9a96d1f15519bb3c4dcb40ee3
 16672ea16c012664f8a9f11255518deb
 -----END OpenVPN Static key V1-----
 </tls-crypt>
+VPN_CONF_JP
 
-
-
-
-CONF_JP
-
-echo "== Credenciales (chmod 600) =="
-cat > /etc/openvpn/auth.txt <<'AUTH'
+cat > /etc/openvpn/auth.txt <<'VPN_AUTH'
 EHwataJjAhXVtMi3
 SmHYPf0hnS6Sq9qS2hjNobd13Vfohkjv
-
-
-AUTH
+VPN_AUTH
 chmod 600 /etc/openvpn/auth.txt
 
-echo "== Scripts =="
+# ---------------------------------------------------------------------
+# 3) Scripts de control
+# ---------------------------------------------------------------------
 cat > /usr/local/sbin/vpn-on <<'VPN_ON'
 #!/bin/bash
 # vpn-on [nl|us] - Activa la VPN ProtonVPN SOLO para Freebuff y OpenCode
@@ -542,10 +537,14 @@ done
 sudo iptables -t nat -A POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP"
 
 # 5) Mover Freebuff y OpenCode al slice VPN (sus conexiones nuevas saldrán por el túnel)
-echo "Moviendo Freebuff/OpenCode al slice VPN..."
-sudo python3 - <<'PY'
-import os, sys
-targets = []
+echo "Buscando Freebuff/OpenCode..."
+# Mover procesos vivos a vpn.slice NO es fiable en sesiones SSH (systemd bloquea
+# escribir a cgroup.procs con "Device or resource busy"). La forma correcta de que
+# Freebuff/OpenCode salgan por la VPN es lanzarlos con: sudo vpn-run <app>
+# (usuario ver README). Aqui solo se informa de los encontrados.
+sudo python3 - <<'PY' || true
+import os
+found = []
 for pid in os.listdir('/proc'):
     if not pid.isdigit():
         continue
@@ -555,23 +554,21 @@ for pid in os.listdir('/proc'):
     except Exception:
         continue
     if 'freebuff' in cmd or 'opencode' in cmd:
-        targets.append(pid)
-moved = 0
-with open('/sys/fs/cgroup/vpn.slice/cgroup.procs', 'w') as f:
-    for pid in targets:
-        try:
-            f.write(pid + '\n'); f.flush()
-            moved += 1
-        except Exception:
-            pass
-print(f"  {moved} proceso(s) movidos a vpn.slice")
+        found.append((pid, cmd.strip()[:60]))
+if found:
+    print(f"  Encontrados {len(found)} proceso(s) Freebuff/OpenCode:")
+    for pid, cmd in found[:10]:
+        print(f"    PID {pid}: {cmd}")
+    print("  Para que salgan por la VPN, relanza cada uno con:  sudo vpn-run <comando>")
+else:
+    print("  No hay procesos Freebuff/OpenCode corriendo.")
 PY
 
 # 6) Verificación (a través del túnel)
 ip route show table "$TABLE" | grep -q '^default' || sudo ip route add default dev tun0 src "$TUN_IP" table "$TABLE"
 echo "Verificando salida por el túnel..."
-IPOUT=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://api.ipify.org' 2>/dev/null || echo "?")
-LOC=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://ipinfo.io/json' 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country","?"))' 2>/dev/null || echo "?")
+IPOUT=$(sudo vpn-run curl -s --max-time 10 https://api.ipify.org 2>/dev/null | tail -1)
+LOC=$(sudo vpn-run curl -s --max-time 10 https://ipinfo.io/json 2>/dev/null | tail -1 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country","?"))' 2>/dev/null || echo "?")
 echo "✓ VPN ACTIVA ($FOREIGN)"
 echo "  Salida de Freebuff/OpenCode: $IPOUT ($LOC)"
 echo "  IP física (todo lo demás):   $PHYS_IP  <- intacta"
@@ -579,8 +576,8 @@ echo
 echo "Uso: sudo vpn-run <comando>  (p.ej. sudo vpn-run opencode)"
 
 
-
 VPN_ON
+
 cat > /usr/local/sbin/vpn-off <<'VPN_OFF'
 #!/bin/bash
 # vpn-off - Apaga la VPN y restaura TODO el tráfico por la IP física
@@ -596,9 +593,10 @@ TUN_IP=$(ip -o addr show dev tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d
 if [ -n "$TUN_IP" ]; then
   sudo iptables -t nat -D POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP" 2>/dev/null || true
 fi
-# 2) Detener el túnel
-sudo systemctl stop openvpn-client@protonvpn-nl 2>/dev/null || true
-sudo systemctl stop openvpn-client@protonvpn-us 2>/dev/null || true
+# 2) Detener el túnel: CUALQUIER servicio ProtonVPN activo (no solo nl/us)
+for u in $(systemctl list-units --all --no-legend 'openvpn-client@protonvpn-*' 'openvpn-client@protonvpn-*.service' 2>/dev/null | awk '{print $1}'); do
+  sudo systemctl stop "$u" 2>/dev/null || true
+done
 sleep 2
 if ip a show tun0 >/dev/null 2>&1; then
   sudo ip link del tun0 2>/dev/null || true
@@ -607,8 +605,8 @@ fi
 echo "✓ VPN DESCONECTADA — IP pública: $(curl -s --max-time 8 https://api.ipify.org)"
 
 
-
 VPN_OFF
+
 cat > /usr/local/sbin/vpn-run <<'VPN_RUN'
 #!/bin/bash
 # vpn-run <comando...> - Ejecuta un comando con el tráfico saliendo por la VPN
@@ -624,11 +622,14 @@ if ! ip a show tun0 >/dev/null 2>&1; then
   exit 1
 fi
 RUNAS="${SUDO_USER:-$(id -un)}"
-sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec runuser -u "$1" -- "${@:2}"' _ "$RUNAS" "$@"
-
-
-
+# Se usa systemd-run (no write directo a cgroup.procs): en sesiones SSH, escribir el
+# PID a vpn.slice/cgroup.procs falla con "Device or resource busy" porque systemd
+# gestiona el scope de la sesión. systemd-run crea una unidad bajo vpn.slice de
+# forma legitima y su tráfico se marca (match cgroup /vpn.slice) -> sale por el tunel.
+exec sudo systemd-run --collect --slice=vpn.slice --pipe \
+  runuser -u "$RUNAS" -- "$@"
 VPN_RUN
+
 cat > /usr/local/sbin/vpn-menu <<'VPN_MENU'
 #!/bin/bash
 # ============================================================
@@ -835,16 +836,17 @@ while true; do
   esac
 done
 
-
 VPN_MENU
+
 chmod 755 /usr/local/sbin/vpn-on /usr/local/sbin/vpn-off /usr/local/sbin/vpn-run /usr/local/sbin/vpn-menu
 
-echo "== Slice VPN + sysctl =="
+# ---------------------------------------------------------------------
+# 4) Slice + sysctl
+# ---------------------------------------------------------------------
 cat > /etc/systemd/system/vpn.slice <<'VPN_SLICE'
 [Unit]
 Description=Slice para procesos que usan la VPN (Freebuff, OpenCode)
 [Slice]
-
 
 
 VPN_SLICE
@@ -854,21 +856,18 @@ net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
 
 
-
 SYSCTL
-systemctl daemon-reload
 systemctl start vpn.slice 2>/dev/null || true
 
-echo "== Bajo demanda (sin auto-arranque) =="
+# ---------------------------------------------------------------------
+# 5) Sin auto-arranque del tunel (bajo demanda)
+# ---------------------------------------------------------------------
 for c in nl us jp; do
   systemctl disable "openvpn-client@protonvpn-$c" >/dev/null 2>&1 || true
-  systemctl stop "openvpn-client@protonvpn-$c" >/dev/null 2>&1 || true
 done
 
-echo -e "\n============================================"
-echo -e "${GREEN}✅ Instalación completada.${NC}"
-echo "  sudo vpn-menu            -> menú interactivo"
-echo "  sudo vpn-on [nl|us|jp]   -> encender (país)"
-echo "  sudo vpn-off             -> apagar"
-echo "  sudo vpn-run <cmd>       -> comando por la VPN"
-echo "============================================"
+echo "== Listo. Uso: =="
+echo "  sudo vpn-menu                  -> menú interactivo"
+echo "  sudo vpn-on [nl|us|jp]         -> encender (país)"
+echo "  sudo vpn-run <comando>         -> ejecutar algo por la VPN (p.ej: sudo vpn-run opencode)"
+echo "  sudo vpn-off                   -> apagar"
