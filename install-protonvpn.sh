@@ -10,6 +10,7 @@
 # - No toca tus apps/webs/SSH (la VPN es exclusiva para vpn.slice).
 # - vpn-run ejecuta en el directorio actual del llamador (recupera chats).
 # - vpn-on fuerza IPv4 en el slice (OpenCode/Freebuff por el túnel IPv4).
+# - vpn-menu: 10 paises gratis + seleccion de ciudad (ej. Japon: Osaka/Tokio).
 # =====================================================================
 set -e
 
@@ -443,6 +444,7 @@ case "$COUNTRY" in
   ca) FOREIGN="Canadá" ;; no) FOREIGN="Noruega" ;; ch) FOREIGN="Suiza" ;;
   se) FOREIGN="Suecia" ;; de) FOREIGN="Alemania" ;; gb) FOREIGN="Reino Unido" ;;
   pl) FOREIGN="Polonia" ;; ro) FOREIGN="Rumanía" ;; sg) FOREIGN="Singapur" ;;
+  mx) FOREIGN="México" ;;
   *) FOREIGN="${COUNTRY^^}" ;;
 esac
 
@@ -769,38 +771,69 @@ EOF
 }
 
 select_country_ip() {
-  echo -e "${CYAN}═══ SELECCIÓN DE PAÍS / IP ═══${NC}"
+  echo -e "${CYAN}═══ SELECCIÓN DE PAÍS / UBICACIÓN ═══${NC}"
   echo ""
   echo "Países disponibles (plan gratuito Proton):"
-  echo -e "  ${GREEN}[1]${NC} Países Bajos"
-  echo -e "  ${GREEN}[2]${NC} EE.UU."
-  echo -e "  ${GREEN}[3]${NC} Japón"
-  echo -e "  ${GREEN}[4]${NC} Canadá"
-  echo -e "  ${GREEN}[5]${NC} Noruega"
-  echo -e "  ${GREEN}[6]${NC} Suiza"
-  echo -e "  ${GREEN}[7]${NC} Introducir IP/servidor manualmente"
+  echo -e "  ${GREEN}[1]${NC} 🇨🇦 Canadá"
+  echo -e "  ${GREEN}[2]${NC} 🇺🇸 EE.UU."
+  echo -e "  ${GREEN}[3]${NC} 🇯🇵 Japón"
+  echo -e "  ${GREEN}[4]${NC} 🇲🇽 México"
+  echo -e "  ${GREEN}[5]${NC} 🇳🇱 Países Bajos (Holanda)"
+  echo -e "  ${GREEN}[6]${NC} 🇳🇴 Noruega"
+  echo -e "  ${GREEN}[7]${NC} 🇵🇱 Polonia"
+  echo -e "  ${GREEN}[8]${NC} 🇷🇴 Rumanía"
+  echo -e "  ${GREEN}[9]${NC} 🇸🇬 Singapur"
+  echo -e "  ${GREEN}[10]${NC} 🇨🇭 Suiza"
+  echo -e "  ${GREEN}[11]${NC} Introducir IP/servidor manualmente"
   echo ""
-  echo -n "  Elige país [1-7 o Enter=Países Bajos]: "; read -r p
-  CNT=""; IP=""; PORT="1194"
-  case "${p:-1}" in
-    1) CNT=nl; IP="185.100.235.117"; LABEL="Países Bajos" ;;
-    2) CNT=us; IP="89.187.171.225";  LABEL="EE.UU." ;;
-    3) CNT=jp; IP="45.14.71.5";      LABEL="Japón" ;;
-    4) CNT=ca; IP="149.34.243.97";   LABEL="Canadá" ;;
-    5) CNT=no; IP="89.187.160.9";    LABEL="Noruega" ;;
-    6) CNT=ch; IP="185.159.157.169"; LABEL="Suiza" ;;
-    7) CNT=custom; echo -n "  IP del servidor: "; read -r IP; [ -z "$IP" ] && { echo -e "${RED}IP requerida${NC}"; sleep 1; return; }; LABEL="Personalizado ($IP)" ;;
+  echo -n "  Elige país [1-11 o Enter=Países Bajos]: "; read -r p
+  CNT=""; IP=""; PORT="1194"; LABEL=""
+  case "${p:-5}" in
+    1) CNT=ca; LABEL="Canadá"; CITIES="Vancouver|89.222.98.34, Montreal|84.20.16.29, Toronto|149.22.82.55" ;;
+    2) CNT=us; LABEL="EE.UU."; CITIES="Atlanta|89.187.171.225, Denver|84.17.63.8, Miami|195.181.163.1" ;;
+    3) CNT=jp; LABEL="Japón"; CITIES="Osaka|45.14.71.5, Tokio|138.199.22.102" ;;
+    4) CNT=mx; LABEL="México"; CITIES="Ciudad de México|84.252.113.9" ;;
+    5) CNT=nl; LABEL="Países Bajos (Holanda)"; CITIES="Ámsterdam|190.2.146.180" ;;
+    6) CNT=no; LABEL="Noruega"; CITIES="Oslo|95.173.205.162" ;;
+    7) CNT=pl; LABEL="Polonia"; CITIES="Varsovia|149.102.244.102" ;;
+    8) CNT=ro; LABEL="Rumanía"; CITIES="Bucarest|185.252.220.114" ;;
+    9) CNT=sg; LABEL="Singapur"; CITIES="Singapur|37.19.201.130" ;;
+    10) CNT=ch; LABEL="Suiza"; CITIES="Zúrich|138.199.6.177" ;;
+    11) CNT=custom; echo -n "  IP del servidor: "; read -r IP; [ -z "$IP" ] && { echo -e "${RED}IP requerida${NC}"; sleep 1; return; }; LABEL="Personalizado ($IP)"; IP_SELECT="$IP" ;;
     *) echo -e "${RED}Opción inválida${NC}"; return ;;
   esac
+
+  # Si el país eligió ciudades, mostrar sub-menú de ubicación
+  if [ "${CNT}" != "custom" ]; then
+    echo ""
+    echo -e "${CYAN}--- $LABEL: elige la ubicación ---${NC}"
+    n=1
+    declare -a _ips
+    IFS=',' read -ra _entries <<< "$CITIES"
+    for e in "${_entries[@]}"; do
+      cname="${e%%|*}"; cip="${e##*|}"
+      echo -e "  ${GREEN}[$n]${NC} $cname"
+      _ips[$((n-1))]="$cip"
+      n=$((n+1))
+    done
+    echo -n "  Elige ubicación [1-$((n-1)) o Enter=la 1ª]: "; read -r ci
+    ci="${ci:-1}"
+    if [[ "$ci" =~ ^[0-9]+$ ]] && [ "$ci" -ge 1 ] && [ "$ci" -le $((n-1)) ]; then
+      IP="${_ips[$((ci-1))]}"
+      # nombre legible de la ciudad elegida
+      cname="${_entries[$((ci-1))]%%|*}"
+      LABEL="$LABEL — $cname"
+    else
+      echo -e "${RED}Opción inválida${NC}"; return
+    fi
+  else
+    IP="$IP_SELECT"
+  fi
 
   echo -n "  Puerto [Enter=1194]: "; read -r PRT
   [ -n "$PRT" ] && PORT="$PRT"
 
-  # Detener conexión activa actual
-  sudo systemctl stop openvpn-client@protonvpn-nl 2>/dev/null || true
-  sudo systemctl stop openvpn-client@protonvpn-us 2>/dev/null || true
-
-  # Crear/reconfigurar la config para el país elegido (basada en la US, con CA+tls-crypt)
+  # (La limpieza de la conexión activa y de tun0 la hace vpn-on internamente)
   CCDIR="/etc/openvpn/client"
   NEWCONF="$CCDIR/protonvpn-${CNT}.conf"
   sudo cp "$CCDIR/protonvpn-us.conf" "$NEWCONF" 2>/dev/null
@@ -884,7 +917,7 @@ for c in nl us jp; do
 done
 
 echo "== Listo. Uso: =="
-echo "  sudo vpn-menu                  -> menú interactivo"
-echo "  sudo vpn-on [nl|us|jp]         -> encender (país)"
+echo "  sudo vpn-menu                  -> menú interactivo (10 países + ciudad)"
+echo "  sudo vpn-on [nl|us|jp|mx|pl|ro|sg|...]  -> encender (país)"
 echo "  sudo vpn-run <comando>         -> ejecutar algo por la VPN (p.ej: sudo vpn-run opencode)"
 echo "  sudo vpn-off                   -> apagar"

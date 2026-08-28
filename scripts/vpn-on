@@ -19,6 +19,7 @@ case "$COUNTRY" in
   ca) FOREIGN="Canadá" ;; no) FOREIGN="Noruega" ;; ch) FOREIGN="Suiza" ;;
   se) FOREIGN="Suecia" ;; de) FOREIGN="Alemania" ;; gb) FOREIGN="Reino Unido" ;;
   pl) FOREIGN="Polonia" ;; ro) FOREIGN="Rumanía" ;; sg) FOREIGN="Singapur" ;;
+  mx) FOREIGN="México" ;;
   *) FOREIGN="${COUNTRY^^}" ;;
 esac
 

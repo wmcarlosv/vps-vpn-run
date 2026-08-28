@@ -71,10 +71,28 @@ sudo vpn-menu
 |---|---|
 | **1** | Verificar / instalar OpenVPN |
 | **2** | Configuración de ProtonVPN (ver/editar credenciales, ruta del certificado, copiar un `.ovpn`) |
-| **3** | Encender VPN — elige país e IP (o IP manual) |
+| **3** | Encender VPN — elige país y luego **ubicación/ciudad** (o IP manual) |
 | **4** | Apagar VPN |
 | **5** | Ejecutar un comando por la VPN |
 | **6** | Salir |
+
+**Países y ubicaciones disponibles (plan gratis Proton):**
+
+| País | Ubicaciones |
+|---|---|
+| 🇨🇦 Canadá | Vancouver, Montreal, Toronto |
+| 🇺🇸 EE.UU. | Atlanta, Denver, Miami |
+| 🇯🇵 Japón | **Osaka**, Tokio |
+| 🇲🇽 México | Ciudad de México |
+| 🇳🇱 Países Bajos (Holanda) | Ámsterdam |
+| 🇳🇴 Noruega | Oslo |
+| 🇵🇱 Polonia | Varsovia |
+| 🇷🇴 Rumanía | Bucarest |
+| 🇸🇬 Singapur | Singapur |
+| 🇨🇭 Suiza | Zúrich |
+
+Al elegir un país, el menú te ofrece sus **ciudades** (p. ej. Japón → Osaka o Tokio) y
+te conecta al servidor exacto de esa ciudad.
 
 ### Comandos directos
 ```bash
