@@ -85,7 +85,8 @@ sudo vpn-on ca       # Otro país (si creas su config: protonvpn-ca.conf)
 sudo vpn-off         # Apagar y restaurar IP física
 
 sudo vpn-run <cmd>        # Un comando saliendo por la VPN
-sudo vpn-run opencode     # Abrir OpenCode por la VPN
+sudo vpn-run freebuff     # Freebuff por la VPN
+sudo vpn-run opencode     # OpenCode por la VPN
 sudo vpn-run curl -s https://api.ipify.org   # Comprobar salida (IP de la VPN)
 ```
 
@@ -132,6 +133,36 @@ curl -s https://api.ipify.org
 
 - **Seguridad**: el instalador lleva tus credenciales y certificados de ProtonVPN
   embebidos. Mantén este repositorio **privado** y no lo compartas.
+
+### 🎯 Freebuff y OpenCode por la VPN — en detalle
+
+Hay **dos formas** de que Freebuff/OpenCode salgan por la VPN, y conviene entender
+las dos:
+
+#### A) Automática — al encender la VPN (`vpn-on`)
+Cuando ejecutas `vpn-on <país>`, el script **escanea `/proc` y mueve a `vpn.slice`
+todo proceso cuyo nombre contenga `freebuff` u `opencode`**. Es decir:
+
+- Si ya tienes **Freebuff** abierto (p. ej. como `node /usr/bin/freebuff` o como helper
+  `/home/ubuntu/.config/manicode/freebuff`) → se mueve solo, **no haces nada más**.
+- Si ya tienes **OpenCode** abierto (`/usr/bin/opencode`) → también se mueve solo.
+- Si los lanzas **con otro nombre de proceso** (AppImage, `npx`, binario propio, Docker),
+  la búsqueda automática puede **no detectarlos**. En ese caso usa la forma B.
+
+#### B) Explícita — con `sudo vpn-run <comando>`
+Para lanzar una instancia concreta, o cuando el nombre del proceso varíe según cómo
+instalaste la app. Este siempre enruta ese comando por la VPN:
+
+```bash
+sudo vpn-run freebuff          # Freebuff por la VPN
+sudo vpn-run opencode          # OpenCode por la VPN
+sudo vpn-run node /usr/bin/freebuff     # según cómo la lances
+```
+
+> **Regla práctica:** si Freebuff/OpenCode ya están corriendo → usa `vpn-on`. Si vas a
+> lanzarlos por primera vez con la VPN ya activa, o corren bajo otro nombre → usa
+> `sudo vpn-run <comando>`. Ambas consiguen lo mismo: ese proceso sale por la VPN y
+> el resto del sistema queda por tu IP física.
 
 ---
 
