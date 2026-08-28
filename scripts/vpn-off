@@ -1,0 +1,25 @@
+#!/bin/bash
+# vpn-off - Apaga la VPN y restaura TODO el tráfico por la IP física
+echo "Desconectando VPN..."
+# 1) Quitar marcas y reglas primero: nada debe depender del túnel
+sudo iptables -t mangle -D OUTPUT -j VPN_MARK 2>/dev/null || true
+sudo iptables -t mangle -F VPN_MARK 2>/dev/null || true
+sudo iptables -t mangle -X VPN_MARK 2>/dev/null || true
+sudo ip rule del priority 100 fwmark 0x1 lookup 200 2>/dev/null || true
+sudo ip route flush table 200 2>/dev/null || true
+# Quitar SNAT del túnel si existe
+TUN_IP=$(ip -o addr show dev tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d/ -f1)
+if [ -n "$TUN_IP" ]; then
+  sudo iptables -t nat -D POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP" 2>/dev/null || true
+fi
+# 2) Detener el túnel
+sudo systemctl stop openvpn-client@protonvpn-nl 2>/dev/null || true
+sudo systemctl stop openvpn-client@protonvpn-us 2>/dev/null || true
+sleep 2
+if ip a show tun0 >/dev/null 2>&1; then
+  sudo ip link del tun0 2>/dev/null || true
+fi
+# 3) Verificar
+echo "✓ VPN DESCONECTADA — IP pública: $(curl -s --max-time 8 https://api.ipify.org)"
+
+

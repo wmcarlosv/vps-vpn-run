@@ -1,0 +1,5 @@
+[Unit]
+Description=Slice para procesos que usan la VPN (Freebuff, OpenCode)
+[Slice]
+
+

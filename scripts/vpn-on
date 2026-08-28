@@ -1,0 +1,154 @@
+#!/bin/bash
+# vpn-on [nl|us] - Activa la VPN ProtonVPN SOLO para Freebuff y OpenCode
+# Los procesos de esas apps (en vpn.slice) salen por la VPN.
+# TODO lo demas (tus webs, APIs, MySQL, SSH, etc.) queda por la IP fisica SIEMPRE.
+set -e
+
+COUNTRY="${1:-nl}"
+# Validar que exista la config del país elegido (protonvpn-<pais>.conf)
+CONF_FILE="/etc/openvpn/client/protonvpn-${COUNTRY}.conf"
+if [ ! -f "$CONF_FILE" ]; then
+  echo "✗ No existe config: $CONF_FILE"
+  echo "  Crea una con 'sudo vpn-menu' (Encender VPN -> elegir país) o copia un .ovpn"
+  exit 1
+fi
+
+# Nombre legible del país (se puede ampliar)
+case "$COUNTRY" in
+  nl) FOREIGN="Países Bajos" ;; us) FOREIGN="EE.UU." ;; jp) FOREIGN="Japón" ;;
+  ca) FOREIGN="Canadá" ;; no) FOREIGN="Noruega" ;; ch) FOREIGN="Suiza" ;;
+  se) FOREIGN="Suecia" ;; de) FOREIGN="Alemania" ;; gb) FOREIGN="Reino Unido" ;;
+  pl) FOREIGN="Polonia" ;; ro) FOREIGN="Rumanía" ;; sg) FOREIGN="Singapur" ;;
+  *) FOREIGN="${COUNTRY^^}" ;;
+esac
+
+# --- Limpieza defensiva: si el tun0 quedó huérfano (p.ej. tras stop manual) lo eliminamos
+if ip a show tun0 >/dev/null 2>&1; then
+  # Si el servicio del país aún corre, pararlo primero para no pelear por tun0
+  sudo systemctl stop "openvpn-client@protonvpn-${COUNTRY}" 2>/dev/null || true
+  sleep 1
+  if ip a show tun0 >/dev/null 2>&1; then
+    sudo ip link del tun0 2>/dev/null || true
+    sleep 1
+  fi
+fi
+# Limpiar SNAT residual de tun0 (IPs viejas de otras sesiones)
+while :; do
+  OLD_IP=$(sudo iptables -t nat -L POSTROUTING -nv 2>/dev/null | awk '/SNAT/ && /tun0/ {print $NF; exit}' | sed 's/to://')
+  [ -z "$OLD_IP" ] && break
+  sudo iptables -t nat -D POSTROUTING -o tun0 -j SNAT --to-source "$OLD_IP" 2>/dev/null || break
+done
+
+IFACE=$(ip -o link show up | awk -F': ' '$2!~/^lo/{gsub(/^ /,"",$2); print $2; exit}')
+GW=$(ip route | awk '/^default/ {print $3; exit}')
+TABLE=200
+PHYS_IP=$(ip -o addr show dev "$IFACE" | awk '/inet /{print $4}' | cut -d/ -f1)
+
+# Si ya hay una VPN activa, apagarla limpiamente primero
+if ip a show tun0 >/dev/null 2>&1; then
+  echo "Ya hay una VPN activa; apagándola primero..."
+  /usr/local/sbin/vpn-off
+fi
+
+# 1) Levantar el túnel (aún sin marcas: nada cambia hasta que se instalen)
+echo "Conectando a ProtonVPN ($FOREIGN)..."
+if ! sudo systemctl start "openvpn-client@protonvpn-${COUNTRY}"; then
+  echo "✗ El servicio no arrancó"
+  sudo journalctl -u "openvpn-client@protonvpn-${COUNTRY}" -n 10 --no-pager 2>/dev/null | tail -10
+  exit 1
+fi
+
+for i in $(seq 1 20); do
+  ip a show tun0 >/dev/null 2>&1 && break
+  sleep 1
+done
+if ! ip a show tun0 >/dev/null 2>&1; then
+  echo "✗ El túnel no se levantó"
+  sudo journalctl -u "openvpn-client@protonvpn-${COUNTRY}" -n 15 --no-pager 2>/dev/null | tail -15
+  exit 1
+fi
+
+# 2) Tabla 200: default por el túnel CON src del túnel (crítico para que Proton acepte)
+TUN_IP=$(ip -o addr show dev tun0 | awk '/inet /{print $4}' | cut -d/ -f1)
+sudo ip route add unreachable default table "$TABLE" 2>/dev/null || true
+sudo ip route flush table "$TABLE"
+sudo ip route add default dev tun0 src "$TUN_IP" table "$TABLE"
+
+#    Excepciones: servidores VPN (el túnel no puede pasar por sí mismo)
+for srv in $(sudo grep -hE '^remote ' /etc/openvpn/client/protonvpn-*.conf 2>/dev/null | awk '{print $2}' | sort -u); do
+  case "$srv" in
+    *.*) sudo ip route add "$srv/32" via "$GW" dev "$IFACE" table "$TABLE" 2>/dev/null || true ;;
+  esac
+done
+
+#    Excepciones: gateway y DNS físicos (resolución y red local nunca dependen del túnel)
+sudo ip route add "$GW/32" via "$GW" dev "$IFACE" table "$TABLE" 2>/dev/null || true
+for dns in $(resolvectl dns 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort -u); do
+  sudo ip route add "$dns/32" via "$GW" dev "$IFACE" table "$TABLE" 2>/dev/null || true
+done
+
+# 3) Marcado por política: SOLO procesos en vpn.slice -> túnel.
+#    Respuestas de conexiones entrantes y todo lo demás -> IP física.
+sudo iptables -t mangle -N VPN_MARK 2>/dev/null || sudo iptables -t mangle -F VPN_MARK
+sudo iptables -t mangle -A VPN_MARK -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark --nfmask 0x1 --ctmask 0x1
+sudo iptables -t mangle -A VPN_MARK -m cgroup --path /vpn.slice -j MARK --set-mark 0x1
+sudo iptables -t mangle -A VPN_MARK -m mark --mark 0x1 -j CONNMARK --save-mark --nfmask 0x1 --ctmask 0x1
+sudo iptables -t mangle -C OUTPUT -j VPN_MARK 2>/dev/null || sudo iptables -t mangle -A OUTPUT -j VPN_MARK
+
+# 4) Regla de ruteo: lo marcado -> tabla 200 (túnel)
+sudo ip rule del priority 100 fwmark 0x1 lookup "$TABLE" 2>/dev/null || true
+sudo ip rule add priority 100 fwmark 0x1 lookup "$TABLE"
+
+# 4b) SNAT: forzar origen = IP del túnel en todo lo que sale por tun0
+#     (el kernel no re-selecciona el origen al re-enrutar por marca; Proton
+#     descarta paquetes que no vienen de la subred del túnel)
+#     IMPORTANTE: se REEMPLAZA cualquier SNAT viejo (la IP del túnel cambia
+#     en cada conexión; dejar el anterior hace chocar las reglas y corta el túnel)
+# Limpia reglas SNAT de tun0 existentes (por to-source, ya que -j SNAT a secas
+# no empareja cuando hay --to-source explicitos de sesiones anteriores)
+while :; do
+  OLD_IP=$(sudo iptables -t nat -L POSTROUTING -nv 2>/dev/null | awk '/SNAT/ && /tun0/ {print $NF; exit}' | sed 's/to://')
+  [ -z "$OLD_IP" ] && break
+  sudo iptables -t nat -D POSTROUTING -o tun0 -j SNAT --to-source "$OLD_IP" 2>/dev/null || break
+  sudo iptables -t nat -F POSTROUTING 2>/dev/null
+done
+sudo iptables -t nat -A POSTROUTING -o tun0 -j SNAT --to-source "$TUN_IP"
+
+# 5) Mover Freebuff y OpenCode al slice VPN (sus conexiones nuevas saldrán por el túnel)
+echo "Moviendo Freebuff/OpenCode al slice VPN..."
+sudo python3 - <<'PY'
+import os, sys
+targets = []
+for pid in os.listdir('/proc'):
+    if not pid.isdigit():
+        continue
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as f:
+            cmd = f.read().replace(b'\x00', b' ').decode(errors='ignore').lower()
+    except Exception:
+        continue
+    if 'freebuff' in cmd or 'opencode' in cmd:
+        targets.append(pid)
+moved = 0
+with open('/sys/fs/cgroup/vpn.slice/cgroup.procs', 'w') as f:
+    for pid in targets:
+        try:
+            f.write(pid + '\n'); f.flush()
+            moved += 1
+        except Exception:
+            pass
+print(f"  {moved} proceso(s) movidos a vpn.slice")
+PY
+
+# 6) Verificación (a través del túnel)
+ip route show table "$TABLE" | grep -q '^default' || sudo ip route add default dev tun0 src "$TUN_IP" table "$TABLE"
+echo "Verificando salida por el túnel..."
+IPOUT=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://api.ipify.org' 2>/dev/null || echo "?")
+LOC=$(sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec curl -s --max-time 10 https://ipinfo.io/json' 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("country","?"))' 2>/dev/null || echo "?")
+echo "✓ VPN ACTIVA ($FOREIGN)"
+echo "  Salida de Freebuff/OpenCode: $IPOUT ($LOC)"
+echo "  IP física (todo lo demás):   $PHYS_IP  <- intacta"
+echo
+echo "Uso: sudo vpn-run <comando>  (p.ej. sudo vpn-run opencode)"
+
+

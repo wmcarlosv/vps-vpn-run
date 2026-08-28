@@ -1,0 +1,205 @@
+#!/bin/bash
+# ============================================================
+# vpn-menu — Menú interactivo de la VPN ProtonVPN (bajo demanda)
+# Solo afecta el tráfico de Freebuff/OpenCode (vpn.slice).
+# El resto del sistema SIEMPRE va por la IP física.
+# ============================================================
+
+# ---------- Configuración ----------
+IFACE=$(ip -o link show up | awk -F': ' '$2!~/^lo/{gsub(/^ /,"",$2); print $2; exit}')
+TABLE=200
+CONF_NL="/etc/openvpn/client/protonvpn-nl.conf"
+CONF_US="/etc/openvpn/client/protonvpn-us.conf"
+AUTH="/etc/openvpn/auth.txt"
+
+# Colores
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+active_country() {
+  for c in nl us; do
+    if systemctl is-active openvpn-client@protonvpn-$c >/dev/null 2>&1; then echo "$c"; return; fi
+  done
+  echo "off"
+}
+
+pub_ip() {
+  curl -s --max-time 6 https://api.ipify.org 2>/dev/null
+}
+
+show_status() {
+  echo ""
+  echo "═══ ESTADO ACTUAL ═══"
+  AES=$(active_country)
+  if [ "$AES" = "off" ]; then
+    echo -e "${YELLOW}VPN: APAGADA${NC}"
+    echo -e "IP pública del VPS: ${CYAN}$(pub_ip)${NC}"
+  else
+    PAIS="Países Bajos"; [ "$AES" = "us" ] && PAIS="EE.UU."
+    TUN_IP=$(ip -o addr show tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d/ -f1)
+    echo -e "${GREEN}VPN: ACTIVA ($PAIS)${NC}  | túnel: $TUN_IP"
+    echo -e "  IP de salida (Freebuff/OpenCode): ${CYAN}$(sudo vpn-run curl -s --max-time 6 https://api.ipify.org 2>/dev/null)${NC}"
+    echo -e "  IP física (resto del sistema):    ${CYAN}$(pub_ip)${NC}"
+  fi
+  echo ""
+}
+
+install_openvpn() {
+  echo -e "\n${CYAN}── Verificando OpenVPN ──${NC}"
+  if command -v openvpn >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ OpenVPN ya está instalado: $(openvpn --version 2>/dev/null | head -1)${NC}"
+  else
+    echo -e "${YELLOW}Instalando OpenVPN...${NC}"
+    sudo apt-get update -qq && sudo apt-get install -y openvpn
+    echo -e "${GREEN}✓ OpenVPN instalado${NC}"
+  fi
+  sleep 1
+}
+
+config_proton() {
+  while true; do
+    clear 2>/dev/null || true
+    echo -e "${CYAN}═══ CONFIGURACIÓN DE PROTONVPN ═══${NC}"
+    echo ""
+    echo -e "  1) ${GREEN}Ver credenciales actuales${NC}"
+    echo -e "  2) ${YELLOW}Editar usuario/contraseña${NC}"
+    echo -e "  3) ${YELLOW}Ver ruta del certificado (.conf)${NC}"
+    echo -e "  4) ${YELLOW}Copiar nuevo certificado (.conf)${NC}"
+    echo -e "  5) ${RED}Volver al menú principal${NC}"
+    echo -n "  Elige: "; read -r op
+    case "$op" in
+      1)
+        echo -e "${GREEN}Credenciales OpenVPN (${AUTH}):${NC}"
+        U=$(sudo sed -n '1p' "$AUTH" 2>/dev/null); P=$(sudo sed -n '2p' "$AUTH" 2>/dev/null)
+        [ -n "$U" ] && echo "  Usuario: $U" || echo "  Usuario: (vacío)"
+        [ -n "$P" ] && echo "  Contraseña: ********" || echo "  Contraseña: (vacío)"
+        read -rsp "  (pulsa Enter...)"; echo
+        ;;
+      2)
+        echo -e "${YELLOW}Introduce usuario OpenVPN de Proton (deja vacío para no cambiar):${NC}"
+        read -r nu
+        echo -e "${YELLOW}Introduce contraseña OpenVPN de Proton (deja vacío para no cambiar):${NC}"
+        read -rs np
+        echo ""
+        if [ -n "$nu" ] || [ -n "$np" ]; then
+          OLD_U=$(sudo sed -n '1p' "$AUTH" 2>/dev/null); OLD_P=$(sudo sed -n '2p' "$AUTH" 2>/dev/null)
+          sudo tee "$AUTH" > /dev/null <<EOF
+${nu:-$OLD_U}
+${np:-$OLD_P}
+EOF
+          sudo chmod 600 "$AUTH"
+          echo -e "${GREEN}✓ Credenciales actualizadas${NC}"
+        else
+          echo -e "${YELLOW}Sin cambios${NC}"
+        fi
+        sleep 1
+        ;;
+      3)
+        echo -e "${YELLOW}Certificados/archivos .ovpn/.conf instalados:${NC}"
+        sudo ls -la /etc/openvpn/client/*.conf 2>/dev/null | awk '{print "  "$NF"  ("$5" bytes)"}'
+        read -rsp "  (pulsa Enter...)"; echo
+        ;;
+      4)
+        echo -e "${YELLOW}Archivos .conf/.ovpn en tu HOME actual:${NC}"
+        ls "$HOME"/*.conf "$HOME"/*.ovpn 2>/dev/null || echo "  (ninguno)"
+        echo -e "${CYAN}Puedes subir uno con: scp archivo.ovpn ubuntu@$HOSTNAME:~/${NC}"
+        echo -n "  Nombre del archivo a copiar (o Enter para cancelar): "; read -r F
+        if [ -n "$F" ] && [ -f "$HOME/$F" ]; then
+          DEST="/etc/openvpn/client/${F%.*}.conf"
+          sudo cp "$HOME/$F" "$DEST" && sudo chmod 600 "$DEST"
+          echo -e "${GREEN}✓ Copiado a $DEST${NC}"
+        else
+          echo -e "${YELLOW}Cancelado o archivo no encontrado${NC}"
+        fi
+        sleep 1
+        ;;
+      5) break ;;
+      *) echo -e "${RED}Opción inválida${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+select_country_ip() {
+  echo -e "${CYAN}═══ SELECCIÓN DE PAÍS / IP ═══${NC}"
+  echo ""
+  echo "Países disponibles (plan gratuito Proton):"
+  echo -e "  ${GREEN}[1]${NC} Países Bajos"
+  echo -e "  ${GREEN}[2]${NC} EE.UU."
+  echo -e "  ${GREEN}[3]${NC} Japón"
+  echo -e "  ${GREEN}[4]${NC} Canadá"
+  echo -e "  ${GREEN}[5]${NC} Noruega"
+  echo -e "  ${GREEN}[6]${NC} Suiza"
+  echo -e "  ${GREEN}[7]${NC} Introducir IP/servidor manualmente"
+  echo ""
+  echo -n "  Elige país [1-7 o Enter=Países Bajos]: "; read -r p
+  CNT=""; IP=""; PORT="1194"
+  case "${p:-1}" in
+    1) CNT=nl; IP="185.100.235.117"; LABEL="Países Bajos" ;;
+    2) CNT=us; IP="89.187.171.225";  LABEL="EE.UU." ;;
+    3) CNT=jp; IP="45.14.71.5";      LABEL="Japón" ;;
+    4) CNT=ca; IP="149.34.243.97";   LABEL="Canadá" ;;
+    5) CNT=no; IP="89.187.160.9";    LABEL="Noruega" ;;
+    6) CNT=ch; IP="185.159.157.169"; LABEL="Suiza" ;;
+    7) CNT=custom; echo -n "  IP del servidor: "; read -r IP; [ -z "$IP" ] && { echo -e "${RED}IP requerida${NC}"; sleep 1; return; }; LABEL="Personalizado ($IP)" ;;
+    *) echo -e "${RED}Opción inválida${NC}"; return ;;
+  esac
+
+  echo -n "  Puerto [Enter=1194]: "; read -r PRT
+  [ -n "$PRT" ] && PORT="$PRT"
+
+  # Detener conexión activa actual
+  sudo systemctl stop openvpn-client@protonvpn-nl 2>/dev/null || true
+  sudo systemctl stop openvpn-client@protonvpn-us 2>/dev/null || true
+
+  # Crear/reconfigurar la config para el país elegido (basada en la US, con CA+tls-crypt)
+  CCDIR="/etc/openvpn/client"
+  NEWCONF="$CCDIR/protonvpn-${CNT}.conf"
+  sudo cp "$CCDIR/protonvpn-us.conf" "$NEWCONF" 2>/dev/null
+  sudo sed -i "/^remote /c\\remote $IP $PORT" "$NEWCONF"
+  sudo chmod 600 "$NEWCONF"
+
+  # Conectar
+  echo -e "${CYAN}Conectando a $LABEL ($IP)...${NC}"
+  sudo /usr/local/sbin/vpn-on "$CNT" 2>/dev/null || sudo /usr/local/sbin/vpn-on "$CNT" >/dev/null 2>&1
+  sleep 2
+  if ip a show tun0 >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Conectado a $LABEL ($IP)${NC}"
+    echo -e "  IP de salida: ${CYAN}$(sudo vpn-run curl -s --max-time 6 https://api.ipify.org 2>/dev/null)${NC}"
+  else
+    echo -e "${RED}✗ No se pudo conectar a $LABEL ($IP)${NC}"
+  fi
+  echo ""
+}
+
+turn_off() {
+  echo -e "${YELLOW}═══ APAGANDO VPN ═══${NC}"
+  sudo /usr/local/sbin/vpn-off
+  echo -e "${GREEN}✓ VPN apagada — IP restaurada: $(pub_ip)${NC}"
+  sleep 1
+}
+
+# =================== MENÚ PRINCIPAL ===================
+while true; do
+  clear 2>/dev/null || true
+  echo "═══════════════════════════════════════════════════"
+  echo "        MENÚ VPN PROTONVPN (solo Freebuff/OpenCode)"
+  echo "═══════════════════════════════════════════════════"
+  show_status
+  echo "  1) Instalar OpenVPN"
+  echo "  2) Configuración de ProtonVPN"
+  echo "  3) Encender VPN (elegir país / IP)"
+  echo "  4) Apagar VPN"
+  echo "  5) Ejecutar comando por la VPN (vpn-run)"
+  echo "  6) Salir"
+  echo ""
+  echo -n "  Elige una opción: "; read -r op
+  case "$op" in
+    1) install_openvpn ;;
+    2) config_proton ;;
+    3) clear 2>/dev/null || true; echo -e "${CYAN}═══ ENCENDER VPN ═══${NC}"; select_country_ip ;;
+    4) turn_off ;;
+    5) echo -n "  Comando a ejecutar por la VPN: "; read -r cmd; [ -n "$cmd" ] && sudo vpn-run bash -c "$cmd" && echo -e "${GREEN}✓ Hecho${NC}"; sleep 1 ;;
+    6) echo -e "${GREEN}¡Hasta luego!${NC}"; break ;;
+    *) echo -e "${RED}Opción inválida${NC}"; sleep 1 ;;
+  esac
+done
+

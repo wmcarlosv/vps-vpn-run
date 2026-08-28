@@ -1,0 +1,17 @@
+#!/bin/bash
+# vpn-run <comando...> - Ejecuta un comando con el tráfico saliendo por la VPN
+# Uso: sudo vpn-run curl https://api.ipify.org
+#      sudo vpn-run opencode
+# Solo este comando usa el túnel; el resto del sistema queda por la IP física.
+if [ $# -eq 0 ]; then
+  echo "Uso: sudo vpn-run <comando> [argumentos...]"
+  exit 1
+fi
+if ! ip a show tun0 >/dev/null 2>&1; then
+  echo "✗ La VPN no está activa. Ejecuta primero: sudo vpn-on"
+  exit 1
+fi
+RUNAS="${SUDO_USER:-$(id -un)}"
+sudo bash -c 'echo $$ > /sys/fs/cgroup/vpn.slice/cgroup.procs; exec runuser -u "$1" -- "${@:2}"' _ "$RUNAS" "$@"
+
+
