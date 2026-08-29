@@ -1,428 +1,34 @@
-#!/bin/bash
-# =====================================================================
-# Instalador ProtonVPN (VPS VPN Run) — Freebuff/OpenCode por la VPN
-#
-# Instala TODO: OpenVPN (si falta), configs NL/US/JP, credenciales y
-# certificados, los 4 scripts (vpn-on/off/run/menu), vpn.slice y sysctl.
-# - Portatil: detecta interfaz de red y gateway automaticamente.
-# - Idempotente: se puede ejecutar varias veces sin romper nada.
-# - No activa la VPN ni la auto-arranca (bajo demanda).
-# - No toca tus apps/webs/SSH (la VPN es exclusiva para vpn.slice).
-# - vpn-run ejecuta en el directorio actual del llamador (recupera chats).
-# - vpn-on fuerza IPv4 en el slice (OpenCode/Freebuff por el túnel IPv4).
-# - vpn-menu: 10 paises gratis + seleccion de ciudad (ej. Japon: Osaka/Tokio).
-# =====================================================================
+#!/usr/bin/env bash
+# ============================================================
+#  Instalador VPN ProtonVPN para VPS (solo Freebuff/OpenCode)
+#  Generado automaticamente. Contiene todo embebido.
+# ============================================================
 set -e
 
-echo "== VPS VPN Run — instalador =="
-echo
-
-# ---------------------------------------------------------------------
-# 1) Instalar OpenVPN si no existe
-# ---------------------------------------------------------------------
-if ! command -v openvpn >/dev/null 2>&1; then
-  echo "  Instalando openvpn..."
-  apt-get update -qq && apt-get install -y openvpn
-else
-  echo "  openvpn ya instalado ($(openvpn --version 2>/dev/null | head -1))"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Ejecuta con sudo: sudo bash install-protonvpn.sh"
+  exit 1
 fi
 
-# ---------------------------------------------------------------------
-# 2) Configs de protonvpn (NL / US / JP) + credenciales
-# ---------------------------------------------------------------------
-mkdir -p /etc/openvpn/client
+echo "=== Instalando OpenVPN ==="
+if ! command -v openvpn >/dev/null 2>&1; then
+  apt-get update -y && apt-get install -y openvpn
+else
+  echo "OpenVPN ya instalado"
+fi
 
-cat > /etc/openvpn/client/protonvpn-nl.conf <<'VPN_CONF_NL'
-# ==============================================================================
-# Copyright (c) 2023 Proton AG (Switzerland)
-# Email: contact@protonvpn.com
-#
-# The MIT License (MIT)
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
-# ==============================================================================
+mkdir -p /etc/openvpn/client /usr/local/sbin
 
-# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
-# The same entry IP allows to connect to multiple exit IPs in the same data center.
-
-# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
-# append a special suffix to your OpenVPN username.
-# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
-
-# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
-# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
-# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
-# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
-# Note that you can combine the "+nr" suffix with other suffixes.
-
-client
-dev tun
-proto udp
-remote 185.100.235.117 1194
-remote 185.100.235.117 1194
-remote 185.100.235.117 1194
-remote-random
-
-
-resolv-retry infinite
-nobind
-pull-filter ignore "redirect-gateway"
-pull-filter ignore "dhcp-option DNS"
-route-nopull
-
-cipher AES-256-GCM
-
-setenv CLIENT_CERT 0
-tun-mtu 1500
-mssfix 0
-persist-key
-persist-tun
-
-reneg-sec 0
-
-remote-cert-tls server
-auth-user-pass /etc/openvpn/auth.txt
-
-script-security 2
-
-<ca>
------BEGIN CERTIFICATE-----
-MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
-BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
-QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
-Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
-SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
-dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
-AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
-QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
-5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
-z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
-aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
-MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
-ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
-El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
-3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
-IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
-MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
-g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
-HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
-CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
-4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
-bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
-gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
-lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
-x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
-VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
-DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
-EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
-KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
-bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
-EA==
------END CERTIFICATE-----
-</ca>
-
-<tls-crypt>
------BEGIN OpenVPN Static key V1-----
-6acef03f62675b4b1bbd03e53b187727
-423cea742242106cb2916a8a4c829756
-3d22c7e5cef430b1103c6f66eb1fc5b3
-75a672f158e2e2e936c3faa48b035a6d
-e17beaac23b5f03b10b868d53d03521d
-8ba115059da777a60cbfd7b2c9c57472
-78a15b8f6e68a3ef7fd583ec9f398c8b
-d4735dab40cbd1e3c62a822e97489186
-c30a0b48c7c38ea32ceb056d3fa5a710
-e10ccc7a0ddb363b08c3d2777a3395e1
-0c0b6080f56309192ab5aacd4b45f55d
-a61fc77af39bd81a19218a79762c3386
-2df55785075f37d8c71dc8a42097ee43
-344739a0dd48d03025b0450cf1fb5e8c
-aeb893d9a96d1f15519bb3c4dcb40ee3
-16672ea16c012664f8a9f11255518deb
------END OpenVPN Static key V1-----
-</tls-crypt>
-VPN_CONF_NL
-
-cat > /etc/openvpn/client/protonvpn-us.conf <<'VPN_CONF_US'
-# ==============================================================================
-# Copyright (c) 2023 Proton AG (Switzerland)
-# Email: contact@protonvpn.com
-#
-# The MIT License (MIT)
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
-# ==============================================================================
-
-# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
-# The same entry IP allows to connect to multiple exit IPs in the same data center.
-
-# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
-# append a special suffix to your OpenVPN username.
-# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
-
-# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
-# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
-# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
-# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
-# Note that you can combine the "+nr" suffix with other suffixes.
-
-client
-dev tun
-proto udp
-remote 89.187.171.225 1194
-remote 89.187.171.225 1194
-remote 89.187.171.225 1194
-remote-random
-
-
-resolv-retry infinite
-nobind
-pull-filter ignore "redirect-gateway"
-pull-filter ignore "dhcp-option DNS"
-route-nopull
-
-cipher AES-256-GCM
-
-setenv CLIENT_CERT 0
-tun-mtu 1500
-mssfix 0
-persist-key
-persist-tun
-
-reneg-sec 0
-
-remote-cert-tls server
-auth-user-pass /etc/openvpn/auth.txt
-
-script-security 2
-
-<ca>
------BEGIN CERTIFICATE-----
-MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
-BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
-QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
-Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
-SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
-dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
-AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
-QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
-5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
-z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
-aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
-MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
-ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
-El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
-3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
-IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
-MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
-g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
-HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
-CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
-4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
-bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
-gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
-lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
-x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
-VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
-DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
-EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
-KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
-bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
-EA==
------END CERTIFICATE-----
-</ca>
-
-<tls-crypt>
------BEGIN OpenVPN Static key V1-----
-6acef03f62675b4b1bbd03e53b187727
-423cea742242106cb2916a8a4c829756
-3d22c7e5cef430b1103c6f66eb1fc5b3
-75a672f158e2e2e936c3faa48b035a6d
-e17beaac23b5f03b10b868d53d03521d
-8ba115059da777a60cbfd7b2c9c57472
-78a15b8f6e68a3ef7fd583ec9f398c8b
-d4735dab40cbd1e3c62a822e97489186
-c30a0b48c7c38ea32ceb056d3fa5a710
-e10ccc7a0ddb363b08c3d2777a3395e1
-0c0b6080f56309192ab5aacd4b45f55d
-a61fc77af39bd81a19218a79762c3386
-2df55785075f37d8c71dc8a42097ee43
-344739a0dd48d03025b0450cf1fb5e8c
-aeb893d9a96d1f15519bb3c4dcb40ee3
-16672ea16c012664f8a9f11255518deb
------END OpenVPN Static key V1-----
-</tls-crypt>
-VPN_CONF_US
-
-cat > /etc/openvpn/client/protonvpn-jp.conf <<'VPN_CONF_JP'
-# ==============================================================================
-# Copyright (c) 2023 Proton AG (Switzerland)
-# Email: contact@protonvpn.com
-#
-# The MIT License (MIT)
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
-# ==============================================================================
-
-# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
-# The same entry IP allows to connect to multiple exit IPs in the same data center.
-
-# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
-# append a special suffix to your OpenVPN username.
-# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
-
-# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
-# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
-# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
-# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
-# Note that you can combine the "+nr" suffix with other suffixes.
-
-client
-dev tun
-proto udp
-remote 45.14.71.5 1194
-remote 45.14.71.5 1194
-remote 45.14.71.5 1194
-remote-random
-
-
-resolv-retry infinite
-nobind
-pull-filter ignore "redirect-gateway"
-pull-filter ignore "dhcp-option DNS"
-route-nopull
-
-cipher AES-256-GCM
-
-setenv CLIENT_CERT 0
-tun-mtu 1500
-mssfix 0
-persist-key
-persist-tun
-
-reneg-sec 0
-
-remote-cert-tls server
-auth-user-pass /etc/openvpn/auth.txt
-
-script-security 2
-
-<ca>
------BEGIN CERTIFICATE-----
-MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
-BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
-QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
-Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
-SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
-dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
-AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
-QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
-5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
-z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
-aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
-MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
-ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
-El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
-3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
-IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
-MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
-g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
-HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
-CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
-4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
-bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
-gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
-lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
-x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
-VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
-DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
-EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
-KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
-bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
-EA==
------END CERTIFICATE-----
-</ca>
-
-<tls-crypt>
------BEGIN OpenVPN Static key V1-----
-6acef03f62675b4b1bbd03e53b187727
-423cea742242106cb2916a8a4c829756
-3d22c7e5cef430b1103c6f66eb1fc5b3
-75a672f158e2e2e936c3faa48b035a6d
-e17beaac23b5f03b10b868d53d03521d
-8ba115059da777a60cbfd7b2c9c57472
-78a15b8f6e68a3ef7fd583ec9f398c8b
-d4735dab40cbd1e3c62a822e97489186
-c30a0b48c7c38ea32ceb056d3fa5a710
-e10ccc7a0ddb363b08c3d2777a3395e1
-0c0b6080f56309192ab5aacd4b45f55d
-a61fc77af39bd81a19218a79762c3386
-2df55785075f37d8c71dc8a42097ee43
-344739a0dd48d03025b0450cf1fb5e8c
-aeb893d9a96d1f15519bb3c4dcb40ee3
-16672ea16c012664f8a9f11255518deb
------END OpenVPN Static key V1-----
-</tls-crypt>
-VPN_CONF_JP
-
-cat > /etc/openvpn/auth.txt <<'VPN_AUTH'
+# --- Credenciales ---
+cat > /etc/openvpn/auth.txt <<'AUTH_EOF'
 EHwataJjAhXVtMi3
 SmHYPf0hnS6Sq9qS2hjNobd13Vfohkjv
-VPN_AUTH
+
+AUTH_EOF
 chmod 600 /etc/openvpn/auth.txt
 
-# ---------------------------------------------------------------------
-# 3) Scripts de control
-# ---------------------------------------------------------------------
-cat > /usr/local/sbin/vpn-on <<'VPN_ON'
+# --- Scripts principales ---
+cat > /usr/local/sbin/vpn-on <<'VPN_ON_EOF'
 #!/bin/bash
 # vpn-on [nl|us] - Activa la VPN ProtonVPN SOLO para Freebuff y OpenCode
 # Los procesos de esas apps (en vpn.slice) salen por la VPN.
@@ -588,9 +194,10 @@ echo
 echo "Uso: sudo vpn-run <comando>  (p.ej. sudo vpn-run opencode)"
 
 
-VPN_ON
+VPN_ON_EOF
+chmod 755 /usr/local/sbin/vpn-on
 
-cat > /usr/local/sbin/vpn-off <<'VPN_OFF'
+cat > /usr/local/sbin/vpn-off <<'VPN_OFF_EOF'
 #!/bin/bash
 # vpn-off - Apaga la VPN y restaura TODO el tráfico por la IP física
 echo "Desconectando VPN..."
@@ -619,9 +226,10 @@ fi
 echo "✓ VPN DESCONECTADA — IP pública: $(curl -s --max-time 8 https://api.ipify.org)"
 
 
-VPN_OFF
+VPN_OFF_EOF
+chmod 755 /usr/local/sbin/vpn-off
 
-cat > /usr/local/sbin/vpn-run <<'VPN_RUN'
+cat > /usr/local/sbin/vpn-run <<'VPN_RUN_EOF'
 #!/bin/bash
 # vpn-run <comando...> - Ejecuta un comando con el tráfico saliendo por la VPN
 # Uso: sudo vpn-run curl https://api.ipify.org
@@ -647,9 +255,10 @@ WORKDIR="${PWD:-$(pwd 2>/dev/null)}"
 # El comando arranca en $WORKDIR (cd primero) y hereda TODOS los argumentos.
 exec sudo systemd-run --collect --slice=vpn.slice --pipe \
   runuser -u "$RUNAS" -- bash -c 'cd "$1" 2>/dev/null || true; shift; exec "$@"' vpn-run "$WORKDIR" "$@"
-VPN_RUN
+VPN_RUN_EOF
+chmod 755 /usr/local/sbin/vpn-run
 
-cat > /usr/local/sbin/vpn-menu <<'VPN_MENU'
+cat > /usr/local/sbin/vpn-menu <<'VPN_MENU_EOF'
 #!/bin/bash
 # ============================================================
 # vpn-menu — Menú interactivo de la VPN ProtonVPN (bajo demanda)
@@ -668,7 +277,7 @@ AUTH="/etc/openvpn/auth.txt"
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 active_country() {
-  for c in nl us; do
+  for c in ca us jp mx nl no pl ro sg ch; do
     if systemctl is-active openvpn-client@protonvpn-$c >/dev/null 2>&1; then echo "$c"; return; fi
   done
   echo "off"
@@ -686,7 +295,12 @@ show_status() {
     echo -e "${YELLOW}VPN: APAGADA${NC}"
     echo -e "IP pública del VPS: ${CYAN}$(pub_ip)${NC}"
   else
-    PAIS="Países Bajos"; [ "$AES" = "us" ] && PAIS="EE.UU."
+    case "$AES" in
+      ca) PAIS="Canadá" ;; us) PAIS="EE.UU." ;; jp) PAIS="Japón" ;;
+      mx) PAIS="México" ;; nl) PAIS="Países Bajos (Holanda)" ;; no) PAIS="Noruega" ;;
+      pl) PAIS="Polonia" ;; ro) PAIS="Rumanía" ;; sg) PAIS="Singapur" ;;
+      ch) PAIS="Suiza" ;; *) PAIS="${AES^^}" ;;
+    esac
     TUN_IP=$(ip -o addr show tun0 2>/dev/null | awk '/inet /{print $4}' | cut -d/ -f1)
     echo -e "${GREEN}VPN: ACTIVA ($PAIS)${NC}  | túnel: $TUN_IP"
     echo -e "  IP de salida (Freebuff/OpenCode): ${CYAN}$(sudo vpn-run curl -s --max-time 6 https://api.ipify.org 2>/dev/null)${NC}"
@@ -773,7 +387,7 @@ EOF
 select_country_ip() {
   echo -e "${CYAN}═══ SELECCIÓN DE PAÍS / UBICACIÓN ═══${NC}"
   echo ""
-  echo "Países disponibles (plan gratuito Proton):"
+  echo "Países disponibles (plan gratuito Proton, solo nodos FREE):"
   echo -e "  ${GREEN}[1]${NC} 🇨🇦 Canadá"
   echo -e "  ${GREEN}[2]${NC} 🇺🇸 EE.UU."
   echo -e "  ${GREEN}[3]${NC} 🇯🇵 Japón"
@@ -787,60 +401,72 @@ select_country_ip() {
   echo -e "  ${GREEN}[11]${NC} Introducir IP/servidor manualmente"
   echo ""
   echo -n "  Elige país [1-11 o Enter=Países Bajos]: "; read -r p
-  CNT=""; IP=""; PORT="1194"; LABEL=""
+  CNT=""; IP=""; PORT="1194"; LABEL=""; CITIES=""
   case "${p:-5}" in
-    1) CNT=ca; LABEL="Canadá"; CITIES="Vancouver|89.222.98.34, Montreal|84.20.16.29, Toronto|149.22.82.55" ;;
-    2) CNT=us; LABEL="EE.UU."; CITIES="Atlanta|89.187.171.225, Denver|84.17.63.8, Miami|195.181.163.1" ;;
-    3) CNT=jp; LABEL="Japón"; CITIES="Osaka|45.14.71.5, Tokio|138.199.22.102" ;;
-    4) CNT=mx; LABEL="México"; CITIES="Ciudad de México|84.252.113.9" ;;
-    5) CNT=nl; LABEL="Países Bajos (Holanda)"; CITIES="Ámsterdam|190.2.146.180" ;;
-    6) CNT=no; LABEL="Noruega"; CITIES="Oslo|95.173.205.162" ;;
-    7) CNT=pl; LABEL="Polonia"; CITIES="Varsovia|149.102.244.102" ;;
-    8) CNT=ro; LABEL="Rumanía"; CITIES="Bucarest|185.252.220.114" ;;
-    9) CNT=sg; LABEL="Singapur"; CITIES="Singapur|37.19.201.130" ;;
-    10) CNT=ch; LABEL="Suiza"; CITIES="Zúrich|138.199.6.177" ;;
+    1) CNT=ca; LABEL="Canadá"; CITIES="Toronto|149.88.97.97 149.88.97.122 149.88.97.110 149.22.82.55 149.22.82.28 149.22.82.1, Vancouver|149.22.81.1 149.22.81.28 79.127.254.92 79.127.254.65 149.22.95.193" ;;
+    2) CNT=us; LABEL="EE.UU."; CITIES="Atlanta|89.187.171.225, Miami|195.181.163.1" ;;
+    3) CNT=jp; LABEL="Japón"; CITIES="Osaka|45.14.71.5 45.14.71.7, Tokio|103.125.235.18 138.199.22.102 138.199.21.193 138.199.21.206 138.199.22.103 212.102.51.241 138.199.21.216 138.199.22.97 37.19.205.145 37.19.205.150 212.102.51.247 138.199.21.198 37.19.205.202 45.87.213.226 193.148.16.2 91.207.174.2 212.102.51.1 37.19.205.198 212.102.51.82 212.102.51.55 212.102.51.28 149.88.103.48 149.88.103.53 212.102.51.110 212.102.51.115 138.199.21.203 149.88.103.43 149.88.103.38 149.88.103.33 149.88.103.163 149.88.103.161 149.88.103.162" ;;
+    4) CNT=mx; LABEL="México"; CITIES="Ciudad de México|149.102.224.43 149.88.17.182 84.20.27.47 84.20.27.46 84.20.27.49 84.20.27.48 84.20.27.50 84.20.27.44 84.20.27.45 84.20.27.51 84.20.27.53 84.20.27.58" ;;
+    5) CNT=nl; LABEL="Países Bajos (Holanda)"; CITIES="Ámsterdam|138.199.7.159" ;;
+    6) CNT=no; LABEL="Noruega"; CITIES="Oslo|95.173.205.162 95.173.205.164 95.173.205.167 95.173.205.165 95.173.205.166 95.173.205.160 95.173.205.168 95.173.205.161" ;;
+    7) CNT=pl; LABEL="Polonia"; CITIES="Varsovia|149.102.244.102 149.102.244.107 149.102.244.112 149.102.244.67 217.138.209.18" ;;
+    8) CNT=ro; LABEL="Rumanía"; CITIES="Bucarest|185.252.220.114 146.70.246.146 146.70.246.98 146.70.246.114 185.45.15.34 185.252.220.146 31.14.252.2 146.70.246.130 89.33.8.50" ;;
+    9) CNT=sg; LABEL="Singapur"; CITIES="Singapur|149.88.23.117 149.50.211.129 149.50.211.139 149.50.211.159 149.88.23.102 149.50.211.134 149.50.211.149 149.88.23.112 149.88.23.107 149.50.211.144 149.50.211.154 103.216.221.66 103.216.221.67 103.216.221.68 103.216.221.69 103.216.221.70 103.216.221.71 103.216.221.72 103.216.221.73 103.216.221.74 103.216.221.75" ;;
+    10) CNT=ch; LABEL="Suiza"; CITIES="Zúrich|138.199.6.177 138.199.6.178 138.199.6.179 149.88.27.233 149.88.27.232 149.88.27.234 149.88.27.235 149.88.27.236 135.136.39.2 135.136.39.34 135.136.39.66" ;;
     11) CNT=custom; echo -n "  IP del servidor: "; read -r IP; [ -z "$IP" ] && { echo -e "${RED}IP requerida${NC}"; sleep 1; return; }; LABEL="Personalizado ($IP)"; IP_SELECT="$IP" ;;
     *) echo -e "${RED}Opción inválida${NC}"; return ;;
   esac
 
-  # Si el país eligió ciudades, mostrar sub-menú de ubicación
-  if [ "${CNT}" != "custom" ]; then
+  if [ "${CNT}" = "custom" ]; then
+    IP="$IP_SELECT"
+  else
     echo ""
-    echo -e "${CYAN}--- $LABEL: elige la ubicación ---${NC}"
-    n=1
-    declare -a _ips
+    echo -e "${CYAN}--- $LABEL: elige la ciudad ---${NC}"
+    declare -a _city_names _city_ips
     IFS=',' read -ra _entries <<< "$CITIES"
+    n=1
     for e in "${_entries[@]}"; do
-      cname="${e%%|*}"; cip="${e##*|}"
+      cname="${e%%|*}"; cips="${e##*|}"
+      _city_names[$((n-1))]="$cname"
+      _city_ips[$((n-1))]="$cips"
       echo -e "  ${GREEN}[$n]${NC} $cname"
-      _ips[$((n-1))]="$cip"
       n=$((n+1))
     done
-    echo -n "  Elige ubicación [1-$((n-1)) o Enter=la 1ª]: "; read -r ci
+    echo -n "  Elige ciudad [1-$((n-1)) o Enter=la 1ª]: "; read -r ci
     ci="${ci:-1}"
-    if [[ "$ci" =~ ^[0-9]+$ ]] && [ "$ci" -ge 1 ] && [ "$ci" -le $((n-1)) ]; then
-      IP="${_ips[$((ci-1))]}"
-      # nombre legible de la ciudad elegida
-      cname="${_entries[$((ci-1))]%%|*}"
-      LABEL="$LABEL — $cname"
-    else
+    if [[ ! "$ci" =~ ^[0-9]+$ ]] || [ "$ci" -lt 1 ] || [ "$ci" -gt $((n-1)) ]; then
       echo -e "${RED}Opción inválida${NC}"; return
     fi
-  else
-    IP="$IP_SELECT"
+    city_name="${_city_names[$((ci-1))]}"
+    city_ips="${_city_ips[$((ci-1))]}"
+
+    echo ""
+    echo -e "${CYAN}--- $LABEL — $city_name: elige el nodo ---${NC}"
+    declare -a _nodes
+    read -ra _nodes <<< "$city_ips"
+    m=1
+    for nip in "${_nodes[@]}"; do
+      echo -e "  ${GREEN}[$m]${NC} $nip"
+      m=$((m+1))
+    done
+    echo -n "  Elige nodo [1-$((m-1)) o Enter=el 1º]: "; read -r ni
+    ni="${ni:-1}"
+    if [[ ! "$ni" =~ ^[0-9]+$ ]] || [ "$ni" -lt 1 ] || [ "$ni" -gt $((m-1)) ]; then
+      echo -e "${RED}Opción inválida${NC}"; return
+    fi
+    IP="${_nodes[$((ni-1))]}"
+    LABEL="$LABEL — $city_name"
   fi
 
   echo -n "  Puerto [Enter=1194]: "; read -r PRT
   [ -n "$PRT" ] && PORT="$PRT"
 
-  # (La limpieza de la conexión activa y de tun0 la hace vpn-on internamente)
   CCDIR="/etc/openvpn/client"
   NEWCONF="$CCDIR/protonvpn-${CNT}.conf"
   sudo cp "$CCDIR/protonvpn-us.conf" "$NEWCONF" 2>/dev/null
-  sudo sed -i "/^remote /c\\remote $IP $PORT" "$NEWCONF"
+  sudo sed -i "/^remote /c\remote $IP $PORT" "$NEWCONF"
   sudo chmod 600 "$NEWCONF"
 
-  # Conectar
   echo -e "${CYAN}Conectando a $LABEL ($IP)...${NC}"
   sudo /usr/local/sbin/vpn-on "$CNT" 2>/dev/null || sudo /usr/local/sbin/vpn-on "$CNT" >/dev/null 2>&1
   sleep 2
@@ -886,38 +512,1327 @@ while true; do
   esac
 done
 
-VPN_MENU
+VPN_MENU_EOF
+chmod 755 /usr/local/sbin/vpn-menu
 
-chmod 755 /usr/local/sbin/vpn-on /usr/local/sbin/vpn-off /usr/local/sbin/vpn-run /usr/local/sbin/vpn-menu
+# --- Configs por pais ---
+cat > /etc/openvpn/client/protonvpn-ca.conf <<'CONF_ca_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
 
-# ---------------------------------------------------------------------
-# 4) Slice + sysctl
-# ---------------------------------------------------------------------
-cat > /etc/systemd/system/vpn.slice <<'VPN_SLICE'
-[Unit]
-Description=Slice para procesos que usan la VPN (Freebuff, OpenCode)
-[Slice]
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 149.22.81.1 1194
+remote 149.22.81.1 1194
+remote 149.22.81.1 1194
+remote-random
 
 
-VPN_SLICE
-cat > /etc/sysctl.d/99-vpn-policy-routing.conf <<'SYSCTL'
-# Routing selectivo VPN: respuestas del túnel no deben descartarse por rp_filter estricto
-net.ipv4.conf.all.rp_filter = 2
-net.ipv4.conf.default.rp_filter = 2
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
 
 
-SYSCTL
-systemctl start vpn.slice 2>/dev/null || true
 
-# ---------------------------------------------------------------------
-# 5) Sin auto-arranque del tunel (bajo demanda)
-# ---------------------------------------------------------------------
-for c in nl us jp; do
-  systemctl disable "openvpn-client@protonvpn-$c" >/dev/null 2>&1 || true
-done
+CONF_ca_EOF
+chmod 600 /etc/openvpn/client/protonvpn-ca.conf
 
-echo "== Listo. Uso: =="
-echo "  sudo vpn-menu                  -> menú interactivo (10 países + ciudad)"
-echo "  sudo vpn-on [nl|us|jp|mx|pl|ro|sg|...]  -> encender (país)"
-echo "  sudo vpn-run <comando>         -> ejecutar algo por la VPN (p.ej: sudo vpn-run opencode)"
-echo "  sudo vpn-off                   -> apagar"
+cat > /etc/openvpn/client/protonvpn-ch.conf <<'CONF_ch_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_ch_EOF
+chmod 600 /etc/openvpn/client/protonvpn-ch.conf
+
+cat > /etc/openvpn/client/protonvpn-jp.conf <<'CONF_jp_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 103.125.235.18 1194
+remote 103.125.235.18 1194
+remote 103.125.235.18 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_jp_EOF
+chmod 600 /etc/openvpn/client/protonvpn-jp.conf
+
+cat > /etc/openvpn/client/protonvpn-mx.conf <<'CONF_mx_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 149.102.224.43 1194
+remote 149.102.224.43 1194
+remote 149.102.224.43 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_mx_EOF
+chmod 600 /etc/openvpn/client/protonvpn-mx.conf
+
+cat > /etc/openvpn/client/protonvpn-nl.conf <<'CONF_nl_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 138.199.7.159 1194
+remote 138.199.7.159 1194
+remote 138.199.7.159 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_nl_EOF
+chmod 600 /etc/openvpn/client/protonvpn-nl.conf
+
+cat > /etc/openvpn/client/protonvpn-no.conf <<'CONF_no_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_no_EOF
+chmod 600 /etc/openvpn/client/protonvpn-no.conf
+
+cat > /etc/openvpn/client/protonvpn-pl.conf <<'CONF_pl_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 149.102.244.102 1194
+remote 149.102.244.102 1194
+remote 149.102.244.102 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_pl_EOF
+chmod 600 /etc/openvpn/client/protonvpn-pl.conf
+
+cat > /etc/openvpn/client/protonvpn-ro.conf <<'CONF_ro_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_ro_EOF
+chmod 600 /etc/openvpn/client/protonvpn-ro.conf
+
+cat > /etc/openvpn/client/protonvpn-sg.conf <<'CONF_sg_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_sg_EOF
+chmod 600 /etc/openvpn/client/protonvpn-sg.conf
+
+cat > /etc/openvpn/client/protonvpn-us.conf <<'CONF_us_EOF'
+# ==============================================================================
+# Copyright (c) 2023 Proton AG (Switzerland)
+# Email: contact@protonvpn.com
+#
+# The MIT License (MIT)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR # OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+# ==============================================================================
+
+# The server you are connecting to is using a circuit in order to separate entry IP from exit IP
+# The same entry IP allows to connect to multiple exit IPs in the same data center.
+
+# If you want to explicitly select the exit IP corresponding to server NL-FREE#254 you need to
+# append a special suffix to your OpenVPN username.
+# Please use "EHwataJjAhXVtMi3+b:0" in order to enforce exiting through NL-FREE#254.
+
+# If you are a paying user you can also enable the ProtonVPN ad blocker (NetShield) or Moderate NAT:
+# Use: "EHwataJjAhXVtMi3+b:0+f1" to enable anti-malware filtering
+# Use: "EHwataJjAhXVtMi3+b:0+f2" to additionally enable ad-blocking filtering
+# Use: "EHwataJjAhXVtMi3+b:0+nr" to enable Moderate NAT
+# Note that you can combine the "+nr" suffix with other suffixes.
+
+client
+dev tun
+proto udp
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote 195.181.163.1 1194
+remote-random
+
+
+resolv-retry infinite
+nobind
+pull-filter ignore "redirect-gateway"
+pull-filter ignore "dhcp-option DNS"
+route-nopull
+
+cipher AES-256-GCM
+
+setenv CLIENT_CERT 0
+tun-mtu 1500
+mssfix 0
+persist-key
+persist-tun
+
+reneg-sec 0
+
+remote-cert-tls server
+auth-user-pass /etc/openvpn/auth.txt
+
+script-security 2
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFnTCCA4WgAwIBAgIUCI574SM3Lyh47GyNl0WAOYrqb5QwDQYJKoZIhvcNAQEL
+BQAwXjELMAkGA1UEBhMCQ0gxHzAdBgNVBAoMFlByb3RvbiBUZWNobm9sb2dpZXMg
+QUcxEjAQBgNVBAsMCVByb3RvblZQTjEaMBgGA1UEAwwRUHJvdG9uVlBOIFJvb3Qg
+Q0EwHhcNMTkxMDE3MDgwNjQxWhcNMzkxMDEyMDgwNjQxWjBeMQswCQYDVQQGEwJD
+SDEfMB0GA1UECgwWUHJvdG9uIFRlY2hub2xvZ2llcyBBRzESMBAGA1UECwwJUHJv
+dG9uVlBOMRowGAYDVQQDDBFQcm90b25WUE4gUm9vdCBDQTCCAiIwDQYJKoZIhvcN
+AQEBBQADggIPADCCAgoCggIBAMkUT7zMUS5C+NjQ7YoGpVFlfbN9HFgG4JiKfHB8
+QxnPPRgyTi0zVOAj1ImsRilauY8Ddm5dQtd8qcApoz6oCx5cFiiSQG2uyhS/59Zl
+5wqIkw1o+CgwZgeWkq04lcrxhhfPgJZRFjrYVezy/Z2Ssd18s3/FFNQ+2iV1KC2K
+z8eSPr50u+l9vEKsKiNGkJTdlWjoDKZM2C15i/h8Smi+PdJlx7WMTtYoVC1Fzq0r
+aCPDQl18kspu11b6d8ECPWghKcDIIKuA0r0nGqF1GvH1AmbC/xUaNrKgz9AfioZL
+MP/l22tVG3KKM1ku0eYHX7NzNHgkM2JKnBBannImQQBGTAcvvUlnfF3AHx4vzx7H
+ahpBz8ebThx2uv+vzu8lCVEcKjQObGwLbAONJN2enug8hwSSZQv7tz7onDQWlYh0
+El5fnkrEQGbukNnSyOqTwfobvBllIPzBqdO38eZFA0YTlH9plYjIjPjGl931lFAA
+3G9t0x7nxAauLXN5QVp1yoF1tzXc5kN0SFAasM9VtVEOSMaGHLKhF+IMyVX8h5Iu
+IRC8u5O672r7cHS+Dtx87LjxypqNhmbf1TWyLJSoh0qYhMr+BbO7+N6zKRIZPI5b
+MXc8Be2pQwbSA4ZrDvSjFC9yDXmSuZTyVo6Bqi/KCUZeaXKof68oNxVYeGowNeQd
+g/znAgMBAAGjUzBRMB0GA1UdDgQWBBR44WtTuEKCaPPUltYEHZoyhJo+4TAfBgNV
+HSMEGDAWgBR44WtTuEKCaPPUltYEHZoyhJo+4TAPBgNVHRMBAf8EBTADAQH/MA0G
+CSqGSIb3DQEBCwUAA4ICAQBBmzCQlHxOJ6izys3TVpaze+rUkA9GejgsB2DZXIcm
+4Lj/SNzQsPlZRu4S0IZV253dbE1DoWlHanw5lnXwx8iU82X7jdm/5uZOwj2NqSqT
+bTn0WLAC6khEKKe5bPTf18UOcwN82Le3AnkwcNAaBO5/TzFQVgnVedXr2g6rmpp9
+gdedeEl9acB7xqfYfkrmijqYMm+xeG2rXaanch3HjweMDuZdT/Ub5G6oir0Kowft
+lA1ytjXRg+X+yWymTpF/zGLYfSodWWjMKhpzZtRJZ+9B0pWXUyY7SuCj5T5SMIAu
+x3NQQ46wSbHRolIlwh7zD7kBgkyLe7ByLvGFKa2Vw4PuWjqYwrRbFjb2+EKAwPu6
+VTWz/QQTU8oJewGFipw94Bi61zuaPvF1qZCHgYhVojRy6KcqncX2Hx9hjfVxspBZ
+DrVH6uofCmd99GmVu+qizybWQTrPaubfc/a2jJIbXc2bRQjYj/qmjE3hTlmO3k7V
+EP6i8CLhEl+dX75aZw9StkqjdpIApYwX6XNDqVuGzfeTXXclk4N4aDPwPFM/Yo/e
+KnvlNlKbljWdMYkfx8r37aOHpchH34cv0Jb5Im+1H07ywnshXNfUhRazOpubJRHn
+bjDuBwWS1/Vwp5AJ+QHsPXhJdl3qHc1szJZVJb3VyAWvG/bWApKfFuZX18tiI4N0
+EA==
+-----END CERTIFICATE-----
+</ca>
+
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+6acef03f62675b4b1bbd03e53b187727
+423cea742242106cb2916a8a4c829756
+3d22c7e5cef430b1103c6f66eb1fc5b3
+75a672f158e2e2e936c3faa48b035a6d
+e17beaac23b5f03b10b868d53d03521d
+8ba115059da777a60cbfd7b2c9c57472
+78a15b8f6e68a3ef7fd583ec9f398c8b
+d4735dab40cbd1e3c62a822e97489186
+c30a0b48c7c38ea32ceb056d3fa5a710
+e10ccc7a0ddb363b08c3d2777a3395e1
+0c0b6080f56309192ab5aacd4b45f55d
+a61fc77af39bd81a19218a79762c3386
+2df55785075f37d8c71dc8a42097ee43
+344739a0dd48d03025b0450cf1fb5e8c
+aeb893d9a96d1f15519bb3c4dcb40ee3
+16672ea16c012664f8a9f11255518deb
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+
+
+
+CONF_us_EOF
+chmod 600 /etc/openvpn/client/protonvpn-us.conf
+
+# --- Deshabilitar auto-arranque (la VPN se enciende manualmente) ---
+systemctl disable openvpn-client@protonvpn-us 2>/dev/null || true
+
+echo ""
+echo "=== INSTALACION COMPLETA ==="
+echo "  Menu:            sudo vpn-menu"
+echo "  Encender:        sudo vpn-on <pais>   (ca us jp mx nl no pl ro sg ch)"
+echo "  Apagar:          sudo vpn-off"
+echo "  Ejecutar por VPN: sudo vpn-run <comando>"
+echo ""

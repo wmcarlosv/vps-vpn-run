@@ -76,23 +76,30 @@ sudo vpn-menu
 | **5** | Ejecutar un comando por la VPN |
 | **6** | Salir |
 
-**Países y ubicaciones disponibles (plan gratis Proton):**
+**Países y ubicaciones disponibles (plan gratis Proton, **solo nodos FREE**):**
 
-| País | Ubicaciones |
+| País | Ciudades (nodos free) |
 |---|---|
-| 🇨🇦 Canadá | Vancouver, Montreal, Toronto |
-| 🇺🇸 EE.UU. | Atlanta, Denver, Miami |
-| 🇯🇵 Japón | **Osaka**, Tokio |
-| 🇲🇽 México | Ciudad de México |
-| 🇳🇱 Países Bajos (Holanda) | Ámsterdam |
-| 🇳🇴 Noruega | Oslo |
-| 🇵🇱 Polonia | Varsovia |
-| 🇷🇴 Rumanía | Bucarest |
-| 🇸🇬 Singapur | Singapur |
-| 🇨🇭 Suiza | Zúrich |
+| 🇨🇦 Canadá | Toronto (6), Vancouver (5) |
+| 🇺🇸 EE.UU. | Atlanta (1), Miami (1) |
+| 🇯🇵 Japón | Osaka (2), **Tokio** (32) |
+| 🇲🇽 México | Ciudad de México (12) |
+| 🇳🇱 Países Bajos (Holanda) | Ámsterdam (1) |
+| 🇳🇴 Noruega | Oslo (8) |
+| 🇵🇱 Polonia | Varsovia (5) |
+| 🇷🇴 Rumanía | Bucarest (9) |
+| 🇸🇬 Singapur | Singapur (21) |
+| 🇨🇭 Suiza | Zúrich (11) |
 
-Al elegir un país, el menú te ofrece sus **ciudades** (p. ej. Japón → Osaka o Tokio) y
-te conecta al servidor exacto de esa ciudad.
+> **Importante:** solo se listan nodos que **aceptan la cuenta gratuita**. Proton
+> tiene en cada país muchos servidores de **pago** que rechazan la autenticación
+> con `AUTH_FAILED` (p. ej. `node-mx-12`, `node-ca-46`). Cada lista fue
+> verificada conectando a todos los nodos (`node-<pais>-NN.protonvpn.net`) con la
+> cuenta free. En total hay **114 nodos gratuitos** en el menú.
+
+Al elegir un país, el menú te ofrece sus **ciudades**, y dentro de cada ciudad
+puedes elegir el **nodo exacto** (IP) al que conectarte. Si un nodo falla,
+prueba con otro de la misma ciudad.
 
 ### Comandos directos
 ```bash
